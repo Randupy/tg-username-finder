@@ -1186,13 +1186,21 @@ function stopLoginPolling() {
 function bindSearchForm() {
   const form = $("#search-form");
   const mode = $("#search-mode");
-  const updateWordFields = () => {
+  const digits = $("#search-digits");
+  const digitsRequire = digits.querySelector('option[value="require"]');
+  const updateModeFields = () => {
     const isWord = mode.value === "word";
+    const isTranslit = mode.value === "translit";
     $("#word-fields").hidden = !isWord;
     $("#search-word").required = isWord;
+    digitsRequire.disabled = isTranslit;
+    if (isTranslit && digits.value === "require") digits.value = "exclude";
+    $("#search-digits-hint").textContent = isTranslit
+      ? "Точный транслит одного существительного — без цифр и суффиксов."
+      : "Политика цифр для сгенерированных имён.";
   };
-  mode.addEventListener("change", updateWordFields);
-  updateWordFields();
+  mode.addEventListener("change", updateModeFields);
+  updateModeFields();
 
   form.addEventListener("submit", async (event) => {
     event.preventDefault();

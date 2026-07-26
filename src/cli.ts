@@ -203,6 +203,12 @@ program
       console.error(`Неверный --digits: ${digits}`);
       process.exit(1);
     }
+    if (mode === "translit" && digits === "require") {
+      console.error(
+        "--mode translit генерирует точный транслит одного русского существительного и не добавляет цифры. Используйте --digits exclude или allow.",
+      );
+      process.exit(1);
+    }
 
     const wordPosition = raw.wordPosition as WordPosition;
     if (mode === "word") {

@@ -7,7 +7,7 @@ import {
   isValidFragmentCollectibleUsername,
   isValidTelegramUsername,
 } from "../src/generator.js";
-import { transliterateRussian } from "../src/russianWords.js";
+import { RUSSIAN_WORDS, transliterateRussian } from "../src/russianWords.js";
 import type { SearchOptions } from "../src/types.js";
 
 function options(overrides: Partial<SearchOptions> = {}): SearchOptions {
@@ -105,8 +105,9 @@ test("translit mode produces unique valid handles from complete Russian words", 
   assert.ok(candidates.every((candidate) => candidate.mode === "translit"));
   assert.ok(candidates.every((candidate) => isValidTelegramUsername(candidate.username)));
   assert.ok(candidates.every((candidate) => !/\d/.test(candidate.username)));
+  assert.ok(candidates.every((candidate) => !candidate.username.includes("_")));
 
-  const withDigits = generateTranslit(20, 5, 12, "require");
-  assert.equal(withDigits.length, 20);
-  assert.ok(withDigits.every((candidate) => /\d/.test(candidate.username)));
+  const dictionary = new Set(RUSSIAN_WORDS.map(transliterateRussian));
+  assert.ok(candidates.every((candidate) => dictionary.has(candidate.username)));
+  assert.deepEqual(generateTranslit(20, 5, 12, "require"), []);
 });

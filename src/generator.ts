@@ -180,24 +180,9 @@ function shuffle<T>(values: readonly T[]): T[] {
   return copy;
 }
 
-function translitWithDigits(
-  base: string,
-  digits: DigitsPolicy,
-  maxLen: number,
-): string | null {
-  if (digits !== "require") return base;
-  if (base.length >= maxLen) return null;
-  const room = maxLen - base.length;
-  const digitsCount = randomInt(1, Math.min(2, room));
-  let suffix = "";
-  for (let i = 0; i < digitsCount; i++) suffix += pick(DIGITS.split(""));
-  return base + suffix;
-}
-
 /**
- * Generates usernames from whole Russian words transliterated to Latin.
- * Single words are preferred; two-word combinations expand the search space
- * without cutting words in the middle.
+ * Generates exact Latin transliterations of individual Russian nouns.
+ * No combinations, separators, suffixes or clipped words are permitted.
  */
 export function generateTranslit(
   count: number,
@@ -208,28 +193,12 @@ export function generateTranslit(
 ): GeneratedCandidate[] {
   const targetCount = requestedCount(count);
   const range = validRange(minLen, maxLen);
-  if (targetCount === 0 || !range) return [];
+  if (targetCount === 0 || !range || digits === "require") return [];
 
   const words = [...new Set(RUSSIAN_WORDS.map(transliterateRussian))].filter(Boolean);
-  const bases = new Set<string>(words);
-
-  // Both forms are useful Telegram handles: svetmore and svet_more.
-  // Build only complete-word combinations; length filtering below keeps the
-  // cartesian product small and avoids clipped, meaningless transliterations.
-  for (let i = 0; i < words.length; i++) {
-    for (let j = 0; j < words.length; j++) {
-      if (i === j) continue;
-      const joined = words[i] + words[j];
-      if (joined.length <= range.max) bases.add(joined);
-      const underscored = `${words[i]}_${words[j]}`;
-      if (underscored.length <= range.max) bases.add(underscored);
-    }
-  }
 
   const results = new Set<string>();
-  for (const base of shuffle([...bases])) {
-    const candidate = translitWithDigits(base, digits, range.max);
-    if (!candidate) continue;
+  for (const candidate of shuffle(words)) {
     if (candidate.length < range.min || candidate.length > range.max) continue;
     if (!validator(candidate)) continue;
     results.add(candidate);

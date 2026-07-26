@@ -97,6 +97,11 @@ function validateSearch(params: JsonObject): ValidatedJob {
     "exclude",
     "Цифры",
   );
+  if (mode === "translit" && digits === "require") {
+    throw new Error(
+      "Транслит-режим не добавляет цифры: выберите «Исключить» или «Разрешить»",
+    );
+  }
   const minimumAllowedLength = source === "fragment" ? 4 : 5;
   const minLength = asNumber(
     params.minLength,

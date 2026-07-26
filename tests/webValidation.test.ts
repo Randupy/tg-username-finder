@@ -112,6 +112,7 @@ test("rejects malformed and out-of-range job requests", () => {
     { type: "search", params: { count: 0 } },
     { type: "search", params: { charset: "abc;rm" } },
     { type: "search", params: { mode: "word", word: "../bad" } },
+    { type: "search", params: { mode: "translit", digits: "require" } },
     { type: "collect-sales", params: { pages: 51 } },
     { type: "train-price", params: { epochs: 1.5 } },
     { type: "generate-ai", params: { temperature: 3.1 } },
