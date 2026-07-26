@@ -1,0 +1,860 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <meta name="color-scheme" content="dark">
+    <meta name="theme-color" content="#0B0B14">
+    <meta
+      name="description"
+      content="Локальный интерфейс Handle Radar для поиска свободных юзернеймов в Telegram и Fragment."
+    >
+    <title>Поиск — Handle Radar</title>
+    <link rel="stylesheet" href="/styles.css">
+    <script src="/app.js" defer></script>
+  </head>
+  <body>
+    <a class="skip-link" href="#main-content">К основному содержимому</a>
+
+    <div class="app-shell">
+      <aside class="sidebar" aria-label="Основная навигация">
+        <div class="brand">
+          <span class="brand-mark" aria-hidden="true">HR</span>
+          <span class="brand-copy">
+            <strong>Handle Radar</strong>
+            <small>username intelligence</small>
+          </span>
+        </div>
+
+        <nav class="side-nav" aria-label="Разделы">
+          <a class="nav-link" data-route-link="search" href="#search">
+            <span>Поиск</span>
+            <small>Проверка имён</small>
+          </a>
+          <a class="nav-link" data-route-link="models" href="#models">
+            <span>Модели</span>
+            <small>Данные и обучение</small>
+          </a>
+          <a class="nav-link" data-route-link="favorites" href="#favorites">
+            <span>Избранное</span>
+            <small>Сохранённые находки</small>
+          </a>
+          <a class="nav-link" data-route-link="setup" href="#setup">
+            <span>Настройка</span>
+            <small>Telegram и доступ</small>
+          </a>
+        </nav>
+
+        <div class="sidebar-foot">
+          <div class="local-card">
+            <span class="status-dot status-dot--neutral" id="sidebar-api-dot" aria-hidden="true"></span>
+            <div>
+              <strong id="sidebar-api-label">Подключение…</strong>
+              <small>Данные остаются на этом компьютере</small>
+            </div>
+          </div>
+          <p class="version-label">local dashboard / v5</p>
+        </div>
+      </aside>
+
+      <header class="mobile-header">
+        <div class="brand brand--compact">
+          <span class="brand-mark" aria-hidden="true">HR</span>
+          <span class="brand-copy">
+            <strong>Handle Radar</strong>
+          </span>
+        </div>
+        <span class="mobile-api-state" id="mobile-api-state">
+          <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+          Подключение
+        </span>
+      </header>
+
+      <main id="main-content" class="main-content" tabindex="-1">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Локальная рабочая станция</p>
+            <h1 id="page-title">Поиск юзернеймов</h1>
+          </div>
+          <div class="topbar-meta">
+            <span class="privacy-note">Никакой облачной синхронизации</span>
+          </div>
+        </header>
+
+        <section class="status-strip" aria-label="Состояние системы">
+          <div class="status-chip status-chip--loading" id="status-api">
+            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+            <span>
+              <small>API</small>
+              <strong>Проверяем</strong>
+            </span>
+          </div>
+          <div class="status-chip status-chip--loading" id="status-telegram">
+            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+            <span>
+              <small>Telegram</small>
+              <strong>Проверяем</strong>
+            </span>
+          </div>
+          <div class="status-chip status-chip--loading" id="status-data">
+            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+            <span>
+              <small>Датасет</small>
+              <strong>Загрузка</strong>
+            </span>
+          </div>
+          <div class="status-chip status-chip--loading" id="status-models">
+            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+            <span>
+              <small>Модели</small>
+              <strong>Проверяем</strong>
+            </span>
+          </div>
+        </section>
+
+        <section class="page-view" data-route-view="search" aria-labelledby="search-heading">
+          <div class="search-layout">
+            <article class="panel search-panel">
+              <header class="panel-heading search-heading">
+                <div>
+                  <p class="eyebrow">Discovery / 01</p>
+                  <h2 id="search-heading">Найдите имя, которое ещё свободно</h2>
+                  <p>
+                    Создайте кандидатов и проверьте их через официальный Telegram MTProto,
+                    Fragment или оба источника сразу.
+                  </p>
+                </div>
+                <span class="precision-badge">live check</span>
+              </header>
+
+              <form id="search-form" class="form-stack" novalidate>
+                <div class="field-grid field-grid--primary">
+                  <div class="field">
+                    <label for="search-source">Где проверять</label>
+                    <select id="search-source" name="source">
+                      <option value="both">Telegram + Fragment</option>
+                      <option value="telegram">Только Telegram</option>
+                      <option value="fragment">Только Fragment</option>
+                    </select>
+                  </div>
+
+                  <div class="field">
+                    <label for="search-mode">Как генерировать</label>
+                    <select id="search-mode" name="mode">
+                      <option value="both">Читаемые + случайные</option>
+                      <option value="readable">Читаемые</option>
+                      <option value="random">Случайные</option>
+                      <option value="word">С моим словом</option>
+                    </select>
+                  </div>
+
+                  <div class="field field--range">
+                    <span class="field-label">Длина</span>
+                    <div class="range-pair">
+                      <label class="sr-only" for="search-min-length">Минимальная длина</label>
+                      <input
+                        id="search-min-length"
+                        name="minLength"
+                        type="number"
+                        inputmode="numeric"
+                        min="5"
+                        max="32"
+                        value="5"
+                        required
+                      >
+                      <span aria-hidden="true">—</span>
+                      <label class="sr-only" for="search-max-length">Максимальная длина</label>
+                      <input
+                        id="search-max-length"
+                        name="maxLength"
+                        type="number"
+                        inputmode="numeric"
+                        min="5"
+                        max="32"
+                        value="8"
+                        required
+                      >
+                    </div>
+                  </div>
+
+                  <div class="field">
+                    <label for="search-digits">Цифры</label>
+                    <select id="search-digits" name="digits">
+                      <option value="exclude">Исключить</option>
+                      <option value="allow">Разрешить</option>
+                      <option value="require">Обязательны</option>
+                    </select>
+                  </div>
+
+                  <div class="field">
+                    <label for="search-count">Кандидатов</label>
+                    <input
+                      id="search-count"
+                      name="count"
+                      type="number"
+                      inputmode="numeric"
+                      min="1"
+                      max="200"
+                      value="20"
+                      required
+                    >
+                  </div>
+                </div>
+
+                <div id="word-fields" class="word-fields" hidden>
+                  <div class="field">
+                    <label for="search-word">Обязательное слово</label>
+                    <input
+                      id="search-word"
+                      name="word"
+                      type="text"
+                      inputmode="latin"
+                      pattern="[A-Za-z][A-Za-z0-9]*"
+                      maxlength="32"
+                      placeholder="signal"
+                      autocomplete="off"
+                    >
+                    <small>Латинские буквы и цифры, первая — буква.</small>
+                  </div>
+                  <div class="field">
+                    <label for="search-word-position">Позиция слова</label>
+                    <select id="search-word-position" name="wordPosition">
+                      <option value="any">Любая</option>
+                      <option value="start">В начале</option>
+                      <option value="middle">В середине</option>
+                      <option value="end">В конце</option>
+                    </select>
+                  </div>
+                </div>
+
+                <details class="advanced-box">
+                  <summary>
+                    <span>
+                      <strong>Расширенные параметры</strong>
+                      <small>Набор символов, задержка и резервные способы проверки</small>
+                    </span>
+                    <span class="summary-action" aria-hidden="true">Открыть</span>
+                  </summary>
+                  <div class="advanced-content">
+                    <div class="field-grid field-grid--advanced">
+                      <div class="field">
+                        <label for="search-charset">Набор символов</label>
+                        <input
+                          id="search-charset"
+                          name="charset"
+                          type="text"
+                          inputmode="latin"
+                          pattern="[A-Za-z]+"
+                          placeholder="abcdefghijkmnpqrstuvwxyz"
+                          autocomplete="off"
+                        >
+                        <small>Только латинские буквы; дубликаты будут удалены.</small>
+                      </div>
+                      <div class="field">
+                        <label for="search-delay">Пауза между запросами, мс</label>
+                        <input
+                          id="search-delay"
+                          name="delayMs"
+                          type="number"
+                          inputmode="numeric"
+                          min="250"
+                          max="60000"
+                          step="50"
+                          value="2000"
+                        >
+                        <small>Большая пауза снижает риск ограничения запросов.</small>
+                      </div>
+                    </div>
+
+                    <div class="option-grid">
+                      <label class="check-option">
+                        <input type="checkbox" name="estimatePrice">
+                        <span>
+                          <strong>Оценить цену</strong>
+                          <small>Нужна обученная ценовая модель</small>
+                        </span>
+                      </label>
+                      <label class="check-option">
+                        <input type="checkbox" name="usePlaywright">
+                        <span>
+                          <strong>Playwright для Fragment</strong>
+                          <small>JS-рендер как резервный способ</small>
+                        </span>
+                      </label>
+                      <label class="check-option">
+                        <input type="checkbox" name="debug">
+                        <span>
+                          <strong>Сохранять debug HTML</strong>
+                          <small>Полезно при изменении разметки</small>
+                        </span>
+                      </label>
+                      <label class="check-option check-option--warning">
+                        <input type="checkbox" name="legacyWeb">
+                        <span>
+                          <strong>Legacy web для Telegram</strong>
+                          <small>Менее надёжная HTML-эвристика</small>
+                        </span>
+                      </label>
+                    </div>
+                  </div>
+                </details>
+
+                <div class="form-error" id="search-form-error" role="alert" hidden></div>
+                <div class="form-actions">
+                  <button class="button button--primary" type="submit" data-busy-label="Запускаем поиск…">
+                    Запустить поиск
+                  </button>
+                  <p class="form-hint">Задачи выполняются по одной, чтобы не конфликтовать за сессию Telegram.</p>
+                </div>
+              </form>
+            </article>
+
+            <aside class="panel insight-panel" aria-label="Контекст поиска">
+              <p class="eyebrow">Signal quality</p>
+              <h2>Проверка без догадок</h2>
+              <div class="insight-list">
+                <div>
+                  <span class="insight-index">01</span>
+                  <p><strong>Telegram</strong><small>account.checkUsername через MTProto</small></p>
+                </div>
+                <div>
+                  <span class="insight-index">02</span>
+                  <p><strong>Fragment</strong><small>Листинг и страница лота</small></p>
+                </div>
+                <div>
+                  <span class="insight-index">03</span>
+                  <p><strong>Цена</strong><small>Локальная модель на истории продаж</small></p>
+                </div>
+              </div>
+              <a class="text-link" href="#setup">Проверить настройку Telegram</a>
+            </aside>
+          </div>
+
+          <div id="search-job-panel" class="job-slot" aria-live="polite"></div>
+
+          <section class="panel results-panel" aria-labelledby="results-heading">
+            <header class="section-heading">
+              <div>
+                <p class="eyebrow">Output / live</p>
+                <h2 id="results-heading">Результаты</h2>
+              </div>
+              <span id="results-count" class="count-label">Пока нет данных</span>
+            </header>
+            <div id="results-content">
+              <div class="empty-state">
+                <span class="empty-code" aria-hidden="true">@_</span>
+                <h3>Радар готов к первому запуску</h3>
+                <p>Настройте параметры выше. Здесь появятся статусы Telegram и Fragment для каждого имени.</p>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="page-view" data-route-view="models" aria-labelledby="models-heading" hidden>
+          <header class="page-intro">
+            <div>
+              <p class="eyebrow">Intelligence / 02</p>
+              <h2 id="models-heading">Данные и локальные модели</h2>
+              <p>
+                Соберите реальные продажи Fragment, обучите оценку цены и генератор — всё остаётся в проекте.
+              </p>
+            </div>
+            <span class="precision-badge">local ML</span>
+          </header>
+
+          <div class="metric-grid" id="model-metrics" aria-live="polite">
+            <article class="metric-card metric-card--loading">
+              <span class="skeleton skeleton--label"></span>
+              <span class="skeleton skeleton--value"></span>
+              <span class="skeleton skeleton--line"></span>
+            </article>
+            <article class="metric-card metric-card--loading">
+              <span class="skeleton skeleton--label"></span>
+              <span class="skeleton skeleton--value"></span>
+              <span class="skeleton skeleton--line"></span>
+            </article>
+            <article class="metric-card metric-card--loading">
+              <span class="skeleton skeleton--label"></span>
+              <span class="skeleton skeleton--value"></span>
+              <span class="skeleton skeleton--line"></span>
+            </article>
+          </div>
+
+          <div class="workflow-grid">
+            <article class="panel workflow-card">
+              <header>
+                <span class="step-number">01</span>
+                <div>
+                  <h3>Собрать продажи</h3>
+                  <p>Обновить локальный датасет завершённых аукционов Fragment.</p>
+                </div>
+              </header>
+              <form id="collect-form" class="compact-form" novalidate>
+                <div class="field-grid">
+                  <div class="field">
+                    <label for="collect-pages">Страниц</label>
+                    <input id="collect-pages" name="pages" type="number" min="1" max="50" value="3">
+                  </div>
+                  <div class="field">
+                    <label for="collect-delay">Пауза, мс</label>
+                    <input
+                      id="collect-delay"
+                      name="delayMs"
+                      type="number"
+                      min="250"
+                      max="60000"
+                      step="50"
+                      value="2000"
+                    >
+                  </div>
+                </div>
+                <label class="check-option check-option--compact">
+                  <input type="checkbox" name="debug" checked>
+                  <span>
+                    <strong>Сохранить debug HTML</strong>
+                    <small>Поможет диагностировать изменение разметки</small>
+                  </span>
+                </label>
+                <div class="form-error" id="collect-form-error" role="alert" hidden></div>
+                <button class="button button--secondary" type="submit" data-busy-label="Добавляем…">
+                  Собрать данные
+                </button>
+              </form>
+            </article>
+
+            <article class="panel workflow-card">
+              <header>
+                <span class="step-number">02</span>
+                <div>
+                  <h3>Обучить цену</h3>
+                  <p>MLP оценивает порядок цены на основе истории продаж.</p>
+                </div>
+              </header>
+              <form id="train-price-form" class="compact-form" novalidate>
+                <div class="field">
+                  <label for="price-epochs">Эпох обучения</label>
+                  <input id="price-epochs" name="epochs" type="number" min="1" max="5000" value="200">
+                  <small id="price-training-hint">Минимум 30 записей в датасете.</small>
+                </div>
+                <div class="form-error" id="train-price-form-error" role="alert" hidden></div>
+                <button
+                  class="button button--secondary"
+                  id="train-price-button"
+                  type="submit"
+                  data-busy-label="Добавляем…"
+                >
+                  Обучить модель цены
+                </button>
+              </form>
+            </article>
+
+            <article class="panel workflow-card">
+              <header>
+                <span class="step-number">03</span>
+                <div>
+                  <h3>Обучить генератор</h3>
+                  <p>Посимвольная модель учится на продажах и избранном.</p>
+                </div>
+              </header>
+              <form id="train-generator-form" class="compact-form" novalidate>
+                <div class="field">
+                  <label for="generator-epochs">Эпох обучения</label>
+                  <input id="generator-epochs" name="epochs" type="number" min="1" max="5000" value="100">
+                  <small id="generator-training-hint">Минимум 20 имён в общем корпусе.</small>
+                </div>
+                <div class="form-error" id="train-generator-form-error" role="alert" hidden></div>
+                <button
+                  class="button button--secondary"
+                  id="train-generator-button"
+                  type="submit"
+                  data-busy-label="Добавляем…"
+                >
+                  Обучить генератор
+                </button>
+              </form>
+            </article>
+          </div>
+
+          <article class="panel ai-panel">
+            <header class="panel-heading">
+              <div>
+                <p class="eyebrow">Generate / neural</p>
+                <h2>Создать имена моделью</h2>
+                <p>Управляйте разнообразием через температуру и сразу отправляйте результат на проверку.</p>
+              </div>
+              <span class="precision-badge precision-badge--accent">AI</span>
+            </header>
+            <form id="generate-ai-form" class="form-stack" novalidate>
+              <div class="field-grid field-grid--ai">
+                <div class="field">
+                  <label for="ai-count">Кандидатов</label>
+                  <input id="ai-count" name="count" type="number" min="1" max="200" value="20">
+                </div>
+                <div class="field">
+                  <label for="ai-min-length">Мин. длина</label>
+                  <input id="ai-min-length" name="minLength" type="number" min="5" max="32" value="5">
+                </div>
+                <div class="field">
+                  <label for="ai-max-length">Макс. длина</label>
+                  <input id="ai-max-length" name="maxLength" type="number" min="5" max="32" value="8">
+                </div>
+                <div class="field">
+                  <label for="ai-temperature">Температура</label>
+                  <input
+                    id="ai-temperature"
+                    name="temperature"
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    max="3"
+                    step="0.1"
+                    value="0.8"
+                  >
+                </div>
+                <div class="field">
+                  <label for="ai-source">Проверка</label>
+                  <select id="ai-source" name="source">
+                    <option value="">Только генерация</option>
+                    <option value="both">Telegram + Fragment</option>
+                    <option value="telegram">Telegram</option>
+                    <option value="fragment">Fragment</option>
+                  </select>
+                </div>
+                <div class="field">
+                  <label for="ai-delay">Пауза, мс</label>
+                  <input
+                    id="ai-delay"
+                    name="delayMs"
+                    type="number"
+                    min="250"
+                    max="60000"
+                    step="50"
+                    value="2000"
+                  >
+                </div>
+              </div>
+              <label class="check-option check-option--compact">
+                <input type="checkbox" name="estimatePrice">
+                <span>
+                  <strong>Оценить потенциальную цену</strong>
+                  <small>Работает и без проверки доступности</small>
+                </span>
+              </label>
+              <div class="form-error" id="generate-ai-form-error" role="alert" hidden></div>
+              <div class="form-actions">
+                <button
+                  class="button button--primary"
+                  id="generate-ai-button"
+                  type="submit"
+                  data-busy-label="Добавляем задачу…"
+                >
+                  Сгенерировать
+                </button>
+              </div>
+            </form>
+          </article>
+
+          <div id="models-job-panel" class="job-slot" aria-live="polite"></div>
+
+          <section class="panel history-panel" aria-labelledby="history-heading">
+            <header class="section-heading">
+              <div>
+                <p class="eyebrow">Queue / recent</p>
+                <h2 id="history-heading">Последние задачи</h2>
+              </div>
+              <button class="button button--quiet button--small" id="refresh-jobs" type="button">
+                Обновить
+              </button>
+            </header>
+            <div id="jobs-history">
+              <div class="empty-inline">История появится после первого запуска.</div>
+            </div>
+          </section>
+        </section>
+
+        <section class="page-view" data-route-view="favorites" aria-labelledby="favorites-heading" hidden>
+          <header class="page-intro">
+            <div>
+              <p class="eyebrow">Shortlist / 03</p>
+              <h2 id="favorites-heading">Избранные юзернеймы</h2>
+              <p>Соберите короткий список, добавьте контекст и вернитесь к лучшим вариантам позже.</p>
+            </div>
+            <span class="precision-badge" id="favorites-total">0 сохранено</span>
+          </header>
+
+          <article class="panel favorite-add-panel">
+            <form id="favorite-form" class="favorite-form" novalidate>
+              <div class="field field--username">
+                <label for="favorite-username">Юзернейм</label>
+                <div class="input-prefix">
+                  <span aria-hidden="true">@</span>
+                  <input
+                    id="favorite-username"
+                    name="username"
+                    type="text"
+                    inputmode="latin"
+                    maxlength="32"
+                    autocomplete="off"
+                    placeholder="signalname"
+                    required
+                  >
+                </div>
+              </div>
+              <div class="field">
+                <label for="favorite-source">Источник</label>
+                <select id="favorite-source" name="source">
+                  <option value="telegram">Telegram</option>
+                  <option value="fragment">Fragment</option>
+                </select>
+              </div>
+              <div class="field field--note">
+                <label for="favorite-note">Заметка</label>
+                <input
+                  id="favorite-note"
+                  name="note"
+                  type="text"
+                  maxlength="240"
+                  placeholder="Почему стоит вернуться к этому имени"
+                  autocomplete="off"
+                >
+              </div>
+              <button class="button button--primary" type="submit" data-busy-label="Сохраняем…">
+                Добавить
+              </button>
+              <div class="form-error form-error--wide" id="favorite-form-error" role="alert" hidden></div>
+            </form>
+          </article>
+
+          <section class="panel favorites-panel" aria-label="Список избранного">
+            <div class="filter-row">
+              <div class="segmented-control" aria-label="Фильтр источника">
+                <button type="button" class="segment is-active" data-favorite-filter="all" aria-pressed="true">
+                  Все
+                </button>
+                <button type="button" class="segment" data-favorite-filter="telegram" aria-pressed="false">
+                  Telegram
+                </button>
+                <button type="button" class="segment" data-favorite-filter="fragment" aria-pressed="false">
+                  Fragment
+                </button>
+              </div>
+            </div>
+            <div id="favorites-content" aria-live="polite">
+              <div class="favorite-skeleton">
+                <span class="skeleton skeleton--line"></span>
+                <span class="skeleton skeleton--line"></span>
+                <span class="skeleton skeleton--line"></span>
+              </div>
+            </div>
+          </section>
+        </section>
+
+        <section class="page-view" data-route-view="setup" aria-labelledby="setup-heading" hidden>
+          <header class="page-intro">
+            <div>
+              <p class="eyebrow">Connection / 04</p>
+              <h2 id="setup-heading">Настройка Telegram</h2>
+              <p>
+                API-ключи и строка сессии сохраняются только в локальных файлах проекта и не выводятся обратно в браузер.
+              </p>
+            </div>
+            <span class="precision-badge" id="setup-state-badge">Проверяем</span>
+          </header>
+
+          <div class="setup-grid">
+            <article class="panel setup-card">
+              <header>
+                <span class="step-number">01</span>
+                <div>
+                  <h3>API credentials</h3>
+                  <p>Получите API ID и API Hash в кабинете Telegram, затем сохраните их локально.</p>
+                </div>
+              </header>
+              <div class="security-note">
+                <strong>Безопасное хранение</strong>
+                <p>Значения записываются в <code>.env</code>. Интерфейс никогда не показывает сохранённый API Hash.</p>
+              </div>
+              <form
+                id="credentials-form"
+                class="form-stack"
+                method="post"
+                action="/api/settings/telegram"
+                autocomplete="off"
+                novalidate
+              >
+                <div class="field">
+                  <label for="telegram-api-id">API ID</label>
+                  <input
+                    id="telegram-api-id"
+                    name="apiId"
+                    type="number"
+                    inputmode="numeric"
+                    min="1"
+                    placeholder="12345678"
+                    autocomplete="off"
+                    required
+                  >
+                </div>
+                <div class="field">
+                  <label for="telegram-api-hash">API Hash</label>
+                  <div class="secret-input">
+                    <input
+                      id="telegram-api-hash"
+                      name="apiHash"
+                      type="password"
+                      minlength="16"
+                      maxlength="128"
+                      placeholder="Вставьте API Hash"
+                      autocomplete="new-password"
+                      spellcheck="false"
+                      required
+                    >
+                    <button
+                      id="toggle-api-hash"
+                      class="secret-toggle"
+                      type="button"
+                      aria-controls="telegram-api-hash"
+                      aria-pressed="false"
+                    >
+                      Показать
+                    </button>
+                  </div>
+                  <small>Не отправляйте API Hash другим людям и не публикуйте файл <code>.env</code>.</small>
+                </div>
+                <div class="form-error" id="credentials-form-error" role="alert" hidden></div>
+                <button class="button button--secondary" type="submit" data-busy-label="Сохраняем…">
+                  Сохранить credentials
+                </button>
+              </form>
+            </article>
+
+            <article class="panel setup-card setup-card--login">
+              <header>
+                <span class="step-number">02</span>
+                <div>
+                  <h3>Вход в Telegram</h3>
+                  <p>Одноразовая авторизация создаёт локальную MTProto-сессию для точной проверки.</p>
+                </div>
+              </header>
+
+              <div id="login-state" class="login-state" aria-live="polite">
+                <div class="login-state-head">
+                  <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+                  <div>
+                    <strong>Проверяем состояние</strong>
+                    <small>Связываемся с локальным API</small>
+                  </div>
+                </div>
+              </div>
+
+              <form
+                id="login-phone-form"
+                class="form-stack"
+                method="post"
+                action="/api/login/start"
+                novalidate
+                hidden
+              >
+                <div class="field">
+                  <label for="telegram-phone">Номер телефона</label>
+                  <input
+                    id="telegram-phone"
+                    name="phone"
+                    type="tel"
+                    inputmode="tel"
+                    autocomplete="tel"
+                    placeholder="+79991234567"
+                    required
+                  >
+                  <small>Международный формат, начиная с плюса.</small>
+                </div>
+                <div class="form-error" id="login-phone-form-error" role="alert" hidden></div>
+                <button class="button button--primary" type="submit" data-busy-label="Подключаемся…">
+                  Получить код
+                </button>
+              </form>
+
+              <form
+                id="login-answer-form"
+                class="form-stack"
+                method="post"
+                action="/api/login/answer"
+                novalidate
+                hidden
+              >
+                <div class="field">
+                  <label id="login-answer-label" for="login-answer">Код из Telegram</label>
+                  <input
+                    id="login-answer"
+                    name="value"
+                    type="text"
+                    inputmode="numeric"
+                    autocomplete="one-time-code"
+                    required
+                  >
+                  <small id="login-answer-hint">Код придёт в официальное приложение Telegram.</small>
+                </div>
+                <div class="form-error" id="login-answer-form-error" role="alert" hidden></div>
+                <div class="inline-actions">
+                  <button class="button button--primary" type="submit" data-busy-label="Проверяем…">
+                    Продолжить
+                  </button>
+                  <button class="button button--quiet" id="cancel-login" type="button">
+                    Отменить вход
+                  </button>
+                </div>
+              </form>
+
+              <button class="button button--quiet" id="cancel-connecting" type="button" hidden>
+                Отменить вход
+              </button>
+            </article>
+          </div>
+
+          <article class="panel readiness-panel">
+            <header class="section-heading">
+              <div>
+                <p class="eyebrow">Readiness</p>
+                <h2>Готовность к точной проверке</h2>
+              </div>
+            </header>
+            <div class="readiness-list" id="readiness-list">
+              <div>
+                <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+                <p><strong>API credentials</strong><small>Проверяем</small></p>
+              </div>
+              <div>
+                <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+                <p><strong>MTProto-сессия</strong><small>Проверяем</small></p>
+              </div>
+              <div>
+                <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
+                <p><strong>Telegram-проверка</strong><small>Проверяем</small></p>
+              </div>
+            </div>
+          </article>
+        </section>
+      </main>
+
+      <nav class="bottom-nav" aria-label="Мобильная навигация">
+        <a class="bottom-nav-link" data-route-link="search" href="#search">Поиск</a>
+        <a class="bottom-nav-link" data-route-link="models" href="#models">Модели</a>
+        <a class="bottom-nav-link" data-route-link="favorites" href="#favorites">Избранное</a>
+        <a class="bottom-nav-link" data-route-link="setup" href="#setup">Настройка</a>
+      </nav>
+    </div>
+
+    <div
+      id="toast"
+      class="toast"
+      role="status"
+      aria-live="polite"
+      aria-atomic="true"
+      hidden
+    >
+      <span id="toast-message"></span>
+      <button id="toast-action" type="button" hidden></button>
+      <button id="toast-close" type="button" aria-label="Закрыть уведомление">Закрыть</button>
+    </div>
+  </body>
+</html>

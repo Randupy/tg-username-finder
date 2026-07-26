@@ -1,0 +1,35 @@
+{
+  "name": "tg-username-finder",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CLI для поиска свободных юзернеймов в Telegram и на Fragment с фильтрами и избранным",
+  "scripts": {
+    "login": "tsx src/cli.ts login",
+    "search": "tsx src/cli.ts search",
+    "favorites": "tsx src/cli.ts favorites",
+    "collect-sales": "tsx src/cli.ts collect-sales",
+    "train-price": "tsx src/cli.ts train-price",
+    "train-generator": "tsx src/cli.ts train-generator",
+    "generate-ai": "tsx src/cli.ts generate-ai",
+    "web": "tsx src/web/server.ts",
+    "start": "node dist/web/server.js",
+    "test": "node --import tsx --test tests/*.test.ts",
+    "check": "npm run typecheck && npm test",
+    "build": "tsc",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "cheerio": "^1.0.0",
+    "commander": "^12.1.0",
+    "teleproto": "^1.228.4"
+  },
+  "optionalDependencies": {
+    "playwright": "^1.47.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.0",
+    "tsx": "^4.16.0",
+    "typescript": "^5.5.0"
+  }
+}
