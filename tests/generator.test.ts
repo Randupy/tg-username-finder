@@ -2,10 +2,12 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   generateCandidates,
+  generateTranslit,
   generateWithWord,
   isValidFragmentCollectibleUsername,
   isValidTelegramUsername,
 } from "../src/generator.js";
+import { transliterateRussian } from "../src/russianWords.js";
 import type { SearchOptions } from "../src/types.js";
 
 function options(overrides: Partial<SearchOptions> = {}): SearchOptions {
@@ -80,4 +82,31 @@ test("impossible generator inputs return an empty result", () => {
   assert.deepEqual(generateCandidates(options({ count: 0 })), []);
   assert.deepEqual(generateCandidates(options({ minLength: 9, maxLength: 8 })), []);
   assert.deepEqual(generateWithWord(2, 5, 5, "exclude", "hello", "middle"), []);
+});
+
+test("transliterates Russian words with stable username-safe rules", () => {
+  assert.equal(transliterateRussian("Ёж, Щука и Юла"), "yozhshchukaiyula");
+  assert.equal(transliterateRussian("Объём"), "obyom");
+});
+
+test("translit mode produces unique valid handles from complete Russian words", () => {
+  const candidates = generateCandidates(
+    options({
+      mode: "translit",
+      count: 30,
+      minLength: 5,
+      maxLength: 12,
+      digits: "exclude",
+    }),
+  );
+
+  assert.equal(candidates.length, 30);
+  assert.equal(new Set(candidates.map((candidate) => candidate.username)).size, 30);
+  assert.ok(candidates.every((candidate) => candidate.mode === "translit"));
+  assert.ok(candidates.every((candidate) => isValidTelegramUsername(candidate.username)));
+  assert.ok(candidates.every((candidate) => !/\d/.test(candidate.username)));
+
+  const withDigits = generateTranslit(20, 5, 12, "require");
+  assert.equal(withDigits.length, 20);
+  assert.ok(withDigits.every((candidate) => /\d/.test(candidate.username)));
 });

@@ -88,6 +88,21 @@ test("normalizes word-search values and emits only recognized flags", () => {
   assert.equal(job.args.includes("../../must-not-be-forwarded.json"), false);
 });
 
+test("accepts the Russian transliteration search mode", () => {
+  const job = validateJobRequest({
+    type: "search",
+    params: {
+      mode: "translit",
+      count: 10,
+      minLength: 5,
+      maxLength: 12,
+      delayMs: 500,
+    },
+  });
+
+  assert.equal(job.args[job.args.indexOf("--mode") + 1], "translit");
+});
+
 test("rejects malformed and out-of-range job requests", () => {
   const invalidRequests: unknown[] = [
     null,
@@ -174,11 +189,13 @@ test("normalizes favorite input and enforces source-specific constraints", () =>
       username: " @Alpha_1 ",
       source: "telegram",
       note: "  promising  ",
+      price: { ton: 125.5, usd: 380, rub: 29_000 },
     }),
     {
       username: "alpha_1",
       source: "telegram",
       note: "promising",
+      price: { ton: 125.5, usd: 380, rub: 29_000 },
     },
   );
 
@@ -202,6 +219,13 @@ test("normalizes favorite input and enforces source-specific constraints", () =>
       username: "validname",
       source: "telegram",
       note: "x".repeat(241),
+    }),
+  );
+  assert.throws(() =>
+    normalizeFavoriteInput({
+      username: "validname",
+      source: "telegram",
+      price: { ton: -1 },
     }),
   );
 });

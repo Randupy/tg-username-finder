@@ -235,7 +235,13 @@ export function createWebServer(options: ServerOptions = {}): {
       if (pathname === "/api/favorites" && method === "POST") {
         const entry = normalizeFavoriteInput(await readJson(req));
         sendJson(res, 201, {
-          favorite: addFavorite(entry.username, entry.source, entry.note, FAVORITES_PATH),
+          favorite: addFavorite(
+            entry.username,
+            entry.source,
+            entry.note,
+            FAVORITES_PATH,
+            entry.price,
+          ),
         });
         return;
       }

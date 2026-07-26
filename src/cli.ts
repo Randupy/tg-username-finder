@@ -10,7 +10,16 @@ import { addFavorite, listFavorites, removeFavorite } from "./favorites.js";
 import { disconnectClient, getClient } from "./mtproto/client.js";
 import { runLogin } from "./mtproto/login.js";
 import { telegramStartupAdvice } from "./mtproto/startupError.js";
-import type { CheckResult, DigitsPolicy, GenMode, SearchOptions, Source, SourceOption, WordPosition } from "./types.js";
+import type {
+  CheckResult,
+  DigitsPolicy,
+  FavoritePrice,
+  GenMode,
+  SearchOptions,
+  Source,
+  SourceOption,
+  WordPosition,
+} from "./types.js";
 import { collectSoldHistory } from "./priceData/soldHistory.js";
 import { loadSoldHistory, mergeSoldHistory, saveSoldHistory } from "./priceData/store.js";
 import { trainPriceModel } from "./priceModel/train.js";
@@ -150,7 +159,7 @@ program
   .command("search")
   .description("Сгенерировать кандидатов и проверить их доступность")
   .option("--source <source>", "telegram | fragment | both", "both")
-  .option("--mode <mode>", "readable | random | word | both", "both")
+  .option("--mode <mode>", "readable | random | word | translit | both", "both")
   .option("--min-length <n>", "минимальная длина", "5")
   .option("--max-length <n>", "максимальная длина", "5")
   .option("--digits <policy>", "exclude | allow | require", "exclude")
@@ -186,7 +195,7 @@ program
       console.error(`Неверный --source: ${source}`);
       process.exit(1);
     }
-    if (!["readable", "random", "word", "both"].includes(mode)) {
+    if (!["readable", "random", "word", "translit", "both"].includes(mode)) {
       console.error(`Неверный --mode: ${mode}`);
       process.exit(1);
     }
@@ -625,6 +634,7 @@ favorites
   .description("Добавить юзернейм в избранное")
   .option("--source <source>", "telegram | fragment", "telegram")
   .option("--note <text>", "комментарий")
+  .option("--price-ton <amount>", "цена или оценка цены в TON")
   .action((username, raw) => {
     const source = raw.source as Source;
     if (!["telegram", "fragment"].includes(source)) {
@@ -632,8 +642,15 @@ favorites
       process.exit(1);
     }
     const normalized = normalizeUsernameForCli(username, source);
-    const entry = addFavorite(normalized, source, raw.note);
-    console.log(`Добавлено в избранное: ${entry.username} [${entry.source}]`);
+    const price: FavoritePrice | undefined =
+      raw.priceTon === undefined
+        ? undefined
+        : {
+            ton: numberOption(raw.priceTon, "--price-ton", 0, 1_000_000_000_000),
+          };
+    const entry = addFavorite(normalized, source, raw.note, undefined, price);
+    const priceLabel = entry.price ? `, ${entry.price.ton} TON` : "";
+    console.log(`Добавлено в избранное: ${entry.username} [${entry.source}${priceLabel}]`);
   });
 
 favorites
@@ -666,7 +683,8 @@ favorites
     }
     for (const f of list) {
       const note = f.note ? ` — ${f.note}` : "";
-      console.log(`${f.username} [${f.source}] (добавлено ${f.addedAt})${note}`);
+      const price = f.price ? `, ≈${f.price.ton.toFixed(2)} TON` : "";
+      console.log(`${f.username} [${f.source}${price}] (добавлено ${f.addedAt})${note}`);
     }
   });
 

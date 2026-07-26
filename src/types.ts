@@ -1,7 +1,7 @@
 export type Source = "telegram" | "fragment";
 export type SourceOption = Source | "both";
 
-export type GenMode = "readable" | "random" | "word" | "both" | "ai";
+export type GenMode = "readable" | "random" | "word" | "translit" | "both" | "ai";
 
 /**
  * Куда должно попасть пользовательское слово в режиме --mode word:
@@ -70,5 +70,15 @@ export interface FavoriteEntry {
   username: string;
   source: Source;
   note?: string;
+  price?: FavoritePrice;
   addedAt: string;
+}
+
+export interface FavoritePrice {
+  /** Цена или оценка цены в TON. */
+  ton: number;
+  /** Конвертация по курсу на момент добавления, если она была доступна. */
+  usd?: number;
+  /** Конвертация по курсу на момент добавления, если она была доступна. */
+  rub?: number;
 }

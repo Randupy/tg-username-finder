@@ -757,6 +757,40 @@ function priceLabel(price) {
   return String(price);
 }
 
+function normalizeFavoritePrice(price) {
+  if (typeof price === "number" && Number.isFinite(price) && price >= 0) {
+    return { ton: price };
+  }
+  if (!isObject(price)) return null;
+  const ton = Number(price.ton);
+  if (!Number.isFinite(ton) || ton < 0) return null;
+  const normalized = { ton };
+  const usd = Number(price.usd);
+  const rub = Number(price.rub);
+  if (Number.isFinite(usd) && usd >= 0) normalized.usd = usd;
+  if (Number.isFinite(rub) && rub >= 0) normalized.rub = rub;
+  return normalized;
+}
+
+function encodeFavoritePrice(price) {
+  const normalized = normalizeFavoritePrice(price);
+  return normalized ? encodeURIComponent(JSON.stringify(normalized)) : "";
+}
+
+function decodeFavoritePrice(value) {
+  if (!value) return null;
+  try {
+    return normalizeFavoritePrice(JSON.parse(decodeURIComponent(value)));
+  } catch {
+    return null;
+  }
+}
+
+function favoriteTimestamp(favorite) {
+  const timestamp = Date.parse(favorite?.addedAt || "");
+  return Number.isFinite(timestamp) ? timestamp : Number.NEGATIVE_INFINITY;
+}
+
 function renderResults(result, job = null) {
   const mount = $("#results-content");
   const rows = groupResults(result);
@@ -797,6 +831,7 @@ function renderResults(result, job = null) {
             group.telegram?.checkedAt || group.fragment?.checkedAt || group.checkedAt || null;
           const confidence =
             group.telegram?.confidence || group.fragment?.confidence || group.confidence || null;
+          const encodedPrice = encodeFavoritePrice(group.price);
           const meta = [
             confidence === "high" ? "Высокая точность" : confidence === "low" ? "Эвристика" : "Без оценки",
             priceLabel(group.price),
@@ -824,6 +859,7 @@ function renderResults(result, job = null) {
                   type="button"
                   data-add-result-favorite="${escapeHtml(group.username)}"
                   data-result-source="${preferredSource}"
+                  data-result-price="${escapeHtml(encodedPrice)}"
                 >
                   В избранное
                 </button>
@@ -862,7 +898,9 @@ async function refreshFavorites({ silent = false } = {}) {
 
 function renderFavorites() {
   const mount = $("#favorites-content");
-  const all = state.favorites;
+  const all = [...state.favorites].sort(
+    (a, b) => favoriteTimestamp(b) - favoriteTimestamp(a),
+  );
   const filtered =
     state.favoriteFilter === "all"
       ? all
@@ -898,6 +936,11 @@ function renderFavorites() {
             <span class="source-tag">${escapeHtml(
               favorite.source === "fragment" ? "Fragment" : "Telegram",
             )}</span>
+            ${
+              normalizeFavoritePrice(favorite.price)
+                ? `<span class="favorite-price">${escapeHtml(priceLabel(favorite.price))}</span>`
+                : ""
+            }
             <button
               class="button button--danger button--small"
               type="button"
@@ -951,6 +994,7 @@ async function removeFavorite(username, source, button) {
                   username: existing.username,
                   source: existing.source,
                   note: existing.note || "",
+                  price: existing.price,
                 },
                 { quiet: true },
               );
@@ -1268,6 +1312,7 @@ function bindFavorites() {
       .replace(/^@/, "")
       .toLowerCase();
     const source = form.elements.source.value;
+    const priceRaw = String(form.elements.priceTon.value || "").trim();
     if (!/^[a-z][a-z0-9_]{3,31}$/.test(username) || username.includes("__") || username.endsWith("_")) {
       showFormError(
         "favorite-form",
@@ -1284,12 +1329,22 @@ function bindFavorites() {
       );
       return;
     }
+    const priceTon = priceRaw === "" ? null : Number(priceRaw);
+    if (priceTon !== null && (!Number.isFinite(priceTon) || priceTon < 0 || priceTon > 1_000_000_000_000)) {
+      showFormError(
+        "favorite-form",
+        "Цена должна быть числом от 0 до 1 000 000 000 000 TON.",
+        form.elements.priceTon,
+      );
+      return;
+    }
     setBusy(form, true);
     try {
       await addFavorite({
         username,
         source,
         note: String(form.elements.note.value || "").trim(),
+        price: priceTon === null ? undefined : { ton: priceTon },
       });
       form.reset();
     } catch (error) {
@@ -1457,6 +1512,7 @@ function bindDelegatedActions() {
           username: resultFavorite.dataset.addResultFavorite,
           source: resultFavorite.dataset.resultSource || "telegram",
           note: "Найдено через Handle Radar",
+          price: decodeFavoritePrice(resultFavorite.dataset.resultPrice) || undefined,
         });
         resultFavorite.textContent = "Сохранено";
       } catch (error) {

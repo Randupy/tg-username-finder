@@ -1,4 +1,10 @@
-import type { DigitsPolicy, GenMode, SourceOption, WordPosition } from "../types.js";
+import type {
+  DigitsPolicy,
+  FavoritePrice,
+  GenMode,
+  SourceOption,
+  WordPosition,
+} from "../types.js";
 
 export type JobType =
   | "search"
@@ -81,7 +87,7 @@ function validateSearch(params: JsonObject): ValidatedJob {
   );
   const mode = oneOf<Exclude<GenMode, "ai">>(
     params.mode,
-    ["readable", "random", "word", "both"],
+    ["readable", "random", "word", "translit", "both"],
     "both",
     "Режим",
   );
@@ -256,6 +262,7 @@ export function normalizeFavoriteInput(input: unknown): {
   username: string;
   source: "telegram" | "fragment";
   note?: string;
+  price?: FavoritePrice;
 } {
   const body = asObject(input);
   const username = asString(body.username).replace(/^@/, "").toLowerCase();
@@ -271,5 +278,20 @@ export function normalizeFavoriteInput(input: unknown): {
   if (note.length > 240) {
     throw new Error("Комментарий не должен быть длиннее 240 символов");
   }
-  return { username, source, note: note || undefined };
+
+  let price: FavoritePrice | undefined;
+  if (body.price !== undefined && body.price !== null && body.price !== "") {
+    const rawPrice = asObject(body.price, "Цена");
+    const ton = asNumber(rawPrice.ton, Number.NaN, "Цена в TON", 0, 1_000_000_000_000, false);
+    price = { ton };
+    if (rawPrice.usd !== undefined) {
+      price.usd = asNumber(rawPrice.usd, Number.NaN, "Цена в USD", 0, 1_000_000_000_000_000, false);
+    }
+    if (rawPrice.rub !== undefined) {
+      price.rub = asNumber(rawPrice.rub, Number.NaN, "Цена в RUB", 0, 1_000_000_000_000_000, false);
+    }
+  }
+
+  const normalized = { username, source, note: note || undefined };
+  return price ? { ...normalized, price } : normalized;
 }

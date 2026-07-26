@@ -1512,6 +1512,19 @@ progress::-moz-progress-bar {
   font-size: 0.65rem;
 }
 
+.favorite-price {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.08);
+  color: #a7f3d0;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+}
+
 .favorite-actions {
   display: flex;
   flex-wrap: wrap;
@@ -1891,7 +1904,12 @@ progress::-moz-progress-bar {
   }
 
   .favorite-form {
-    grid-template-columns: minmax(10rem, 1.2fr) minmax(9rem, 0.7fr) minmax(12rem, 1.5fr) auto;
+    grid-template-columns:
+      minmax(10rem, 1.2fr)
+      minmax(8rem, 0.65fr)
+      minmax(7rem, 0.6fr)
+      minmax(12rem, 1.35fr)
+      auto;
     align-items: end;
   }
 

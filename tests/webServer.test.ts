@@ -269,10 +269,16 @@ test("local server protects mutations and persists favorites inside an isolated 
         username: "@Alpha_1",
         source: "telegram",
         note: "first pick",
+        price: { ton: 125.5, usd: 380, rub: 29_000 },
       },
     });
     assert.equal(created.status, 201);
     assert.equal((created.body as any).favorite.username, "alpha_1");
+    assert.deepEqual((created.body as any).favorite.price, {
+      ton: 125.5,
+      usd: 380,
+      rub: 29_000,
+    });
     assert.equal(existsSync(resolve(isolatedRoot, "favorites.json")), true);
     assert.equal(
       JSON.parse(readFileSync(resolve(foreignCwd, "favorites.json"), "utf-8"))[0]
@@ -290,13 +296,21 @@ test("local server protects mutations and persists favorites inside an isolated 
     assert.equal(listed.status, 200);
     assert.deepEqual(
       (listed.body as any).favorites.map(
-        ({ username, source, note }: Record<string, unknown>) => ({
+        ({ username, source, note, price }: Record<string, unknown>) => ({
           username,
           source,
           note,
+          price,
         }),
       ),
-      [{ username: "alpha_1", source: "telegram", note: "first pick" }],
+      [
+        {
+          username: "alpha_1",
+          source: "telegram",
+          note: "first pick",
+          price: { ton: 125.5, usd: 380, rub: 29_000 },
+        },
+      ],
     );
     assert.ok(
       JSON.parse(readFileSync(resolve(isolatedRoot, "favorites.json"), "utf-8"))

@@ -8,7 +8,7 @@
 
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-![Tests](https://img.shields.io/badge/tests-48%20passing-22C55E?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-52%20passing-22C55E?style=flat-square)
 ![Access](https://img.shields.io/badge/access-localhost%20only-6D5EF7?style=flat-square)
 ![Repository](https://img.shields.io/badge/repository-private-111827?style=flat-square&logo=github)
 
@@ -25,7 +25,7 @@
 
 | Направление | Что умеет Handle Radar |
 |---|---|
-| **Поиск** | Слоговые, случайные и word-based генераторы; длина, цифры, алфавит, позиция слова |
+| **Поиск** | Слоговые, случайные, word-based и транслит-генераторы; длина, цифры, алфавит, позиция слова |
 | **Telegram** | Официальная проверка через `account.checkUsername` и разовая MTProto-авторизация |
 | **Fragment** | Разбор актуальных состояний страницы, отдельный режим для collectible-имён длиной от 4 символов |
 | **Надёжность** | Независимые статусы `available`, `invalid`, `unknown` и уровень уверенности каждого источника |
@@ -111,7 +111,7 @@ npm run build && npm start
 
 Интерфейс разделён на четыре рабочих раздела:
 
-1. **Поиск** — параметры генерации, проверка Telegram/Fragment, расширенные флаги, live-прогресс и таблица результатов с уровнем уверенности.
+1. **Поиск** — параметры генерации, в том числе русские слова транслитом, проверка Telegram/Fragment, расширенные флаги, live-прогресс и таблица результатов с уровнем уверенности.
 2. **Модели** — сбор продаж Fragment, обучение модели цены и генератора, нейрогенерация, показатели локального датасета и история задач.
 3. **Избранное** — добавление заметок, фильтрация по Telegram/Fragment и удаление сохранённых вариантов.
 4. **Настройка** — сохранение Telegram API ID/API Hash, пошаговый вход по номеру, коду и 2FA, а также проверка готовности MTProto-сессии.
@@ -182,7 +182,7 @@ npm run search -- --mode both --min-length 5 --max-length 6 --digits exclude --c
 | Флаг | Значения | Описание |
 |---|---|---|
 | `--source` | `telegram` \| `fragment` \| `both` | Где проверять; по умолчанию `both` |
-| `--mode` | `readable` \| `random` \| `word` \| `both` | Слоговые, случайные, с обязательным словом или оба обычных генератора |
+| `--mode` | `readable` \| `random` \| `word` \| `translit` \| `both` | Слоговые, случайные, с обязательным словом, русские слова транслитом или оба обычных генератора |
 | `--min-length`, `--max-length` | число | Диапазон 5–32 для `telegram`/`both`; диапазон 4–32 разрешён только для `fragment` |
 | `--digits` | `exclude` \| `allow` \| `require` | Исключить цифры, разрешить или потребовать хотя бы одну |
 | `--count` | число | Максимальное число уникальных кандидатов; `both` не возвращает больше этого лимита |
@@ -214,9 +214,18 @@ npm run search -- --source fragment --mode random --min-length 4 --max-length 4 
 
 # Слово "big" в начале имени
 npm run search -- --mode word --word big --word-position start --min-length 5 --max-length 8 --count 20 --dry-run
+
+# Русские слова транслитом: mechta, volna, zoloto, svet_more и другие
+npm run search -- --mode translit --min-length 5 --max-length 12 --digits exclude --count 30
 ```
 
 Если пространство вариантов слишком узкое — например, задан один символ и фиксированная короткая длина, — генератор вернёт меньше `--count` и явно сообщит об этом вместо зависания или переполнения результата.
+
+### Режим русских слов транслитом
+
+`--mode translit` выбирает настоящие русские слова из локального словаря и переводит их в Telegram-совместимую латиницу. Используются стабильные правила, например `ё → yo`, `ж → zh`, `х → kh`, `ч → ch`, `щ → shch`, `ю → yu`, `я → ya`.
+
+Сначала генератор предлагает отдельные слова (`mechta`, `volna`, `zoloto`), затем при необходимости расширяет пространство комбинациями из целых слов (`svetmore`, `svet_more`). Слова не обрезаются посередине. Ограничения длины, политика цифр и правила выбранного источника применяются до сетевой проверки.
 
 ### Статусы и confidence
 
@@ -241,13 +250,15 @@ npm run search -- --mode word --word big --word-position start --min-length 5 --
 ## Избранное через CLI
 
 ```bash
-npm run favorites -- add coolvibe --source telegram --note "звучное, короткое"
+npm run favorites -- add coolvibe --source telegram --price-ton 125.5 --note "звучное, короткое"
 npm run favorites -- list
 npm run favorites -- list --source telegram
 npm run favorites -- remove coolvibe --source telegram
 ```
 
-Данные хранятся локально в `favorites.json`.
+Данные хранятся локально в `favorites.json`. Каждая запись может содержать цену в TON и конвертацию в USD/RUB, если имя было добавлено из результата с оценкой цены. Ручное добавление через Handle Radar также содержит необязательное поле **«Цена, TON»**.
+
+Избранное всегда выводится по давности: **сначала недавно добавленные**, затем более старые записи. Старые `favorites.json` без поля `price` загружаются без миграции.
 
 ## Данные и модели v5
 
@@ -384,7 +395,8 @@ npm run build
 ```text
 src/
   cli.ts                         — команды login/search/favorites/collect/train/generate
-  generator.ts                   — readable/random/word, лимиты и отдельная валидность Fragment 4+
+  generator.ts                   — readable/random/word/translit и отдельная валидность Fragment 4+
+  russianWords.ts                — словарь и стабильные правила русского транслита
   favorites.ts                   — локальное JSON-хранилище избранного
   types.ts                       — Source, Availability, confidence и общие контракты
   storage/

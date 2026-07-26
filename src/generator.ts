@@ -1,4 +1,5 @@
 import type { DigitsPolicy, GeneratedCandidate, SearchOptions, WordPosition } from "./types.js";
+import { RUSSIAN_WORDS, transliterateRussian } from "./russianWords.js";
 
 // Правила Telegram: 5–32 символа, начинается с буквы, только [a-zA-Z0-9_],
 // без двойного подчёркивания, не заканчивается на "_".
@@ -170,6 +171,74 @@ export function generateRandom(
   return [...results].map((username) => ({ username, mode: "random" as const }));
 }
 
+function shuffle<T>(values: readonly T[]): T[] {
+  const copy = [...values];
+  for (let i = copy.length - 1; i > 0; i--) {
+    const j = randomInt(0, i);
+    [copy[i], copy[j]] = [copy[j], copy[i]];
+  }
+  return copy;
+}
+
+function translitWithDigits(
+  base: string,
+  digits: DigitsPolicy,
+  maxLen: number,
+): string | null {
+  if (digits !== "require") return base;
+  if (base.length >= maxLen) return null;
+  const room = maxLen - base.length;
+  const digitsCount = randomInt(1, Math.min(2, room));
+  let suffix = "";
+  for (let i = 0; i < digitsCount; i++) suffix += pick(DIGITS.split(""));
+  return base + suffix;
+}
+
+/**
+ * Generates usernames from whole Russian words transliterated to Latin.
+ * Single words are preferred; two-word combinations expand the search space
+ * without cutting words in the middle.
+ */
+export function generateTranslit(
+  count: number,
+  minLen: number,
+  maxLen: number,
+  digits: DigitsPolicy,
+  validator: UsernameValidator = isValidTelegramUsername,
+): GeneratedCandidate[] {
+  const targetCount = requestedCount(count);
+  const range = validRange(minLen, maxLen);
+  if (targetCount === 0 || !range) return [];
+
+  const words = [...new Set(RUSSIAN_WORDS.map(transliterateRussian))].filter(Boolean);
+  const bases = new Set<string>(words);
+
+  // Both forms are useful Telegram handles: svetmore and svet_more.
+  // Build only complete-word combinations; length filtering below keeps the
+  // cartesian product small and avoids clipped, meaningless transliterations.
+  for (let i = 0; i < words.length; i++) {
+    for (let j = 0; j < words.length; j++) {
+      if (i === j) continue;
+      const joined = words[i] + words[j];
+      if (joined.length <= range.max) bases.add(joined);
+      const underscored = `${words[i]}_${words[j]}`;
+      if (underscored.length <= range.max) bases.add(underscored);
+    }
+  }
+
+  const results = new Set<string>();
+  for (const base of shuffle([...bases])) {
+    const candidate = translitWithDigits(base, digits, range.max);
+    if (!candidate) continue;
+    if (candidate.length < range.min || candidate.length > range.max) continue;
+    if (!validator(candidate)) continue;
+    results.add(candidate);
+    if (results.size === targetCount) break;
+  }
+
+  return [...results].map((username) => ({ username, mode: "translit" as const }));
+}
+
 /**
  * Пытается воткнуть одну цифру в filler-символы (prefix/suffix), не трогая
  * само пользовательское слово и не ломая правило "первый символ — буква".
@@ -306,6 +375,9 @@ export function generateCandidates(opts: SearchOptions): GeneratedCandidate[] {
   }
   if (mode === "random") {
     return generateRandom(count, minLength, maxLength, digits, charset, validator);
+  }
+  if (mode === "translit") {
+    return generateTranslit(count, minLength, maxLength, digits, validator);
   }
   if (mode !== "both") return [];
 
