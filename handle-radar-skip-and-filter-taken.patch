@@ -1,0 +1,93 @@
+diff --git a/src/cli.ts b/src/cli.ts
+index e542da9..015ff9d 100644
+--- a/src/cli.ts
++++ b/src/cli.ts
+@@ -186,6 +186,11 @@ program
+     "оценить примерную цену свободных юзернеймов обученной моделью (npm run train-price)",
+     false,
+   )
++  .option(
++    "--show-taken",
++    "включить занятые/некорректные варианты в --out и таблицу результатов (по умолчанию скрыты)",
++    false,
++  )
+   .action(async (raw) => {
+     const source = raw.source as SourceOption;
+     const mode = raw.mode as GenMode;
+@@ -245,6 +250,7 @@ program
+       usePlaywright: Boolean(raw.playwright),
+       legacyWeb: Boolean(raw.legacyWeb),
+     };
++    const showTaken = Boolean(raw.showTaken);
+ 
+     if (opts.minLength > opts.maxLength) {
+       console.error("--min-length не может быть больше --max-length");
+@@ -339,6 +345,15 @@ program
+       const candidateResults: CheckResult[] = [];
+ 
+       for (const src of sourcesToCheck) {
++        // Once a source has already returned a definitive negative (taken or
++        // an invalid format), checking the remaining sources can't change the
++        // outcome for this candidate — it only spends an extra Fragment/
++        // Telegram request and adds flood-limit risk for nothing.
++        const alreadyRuledOut = candidateResults.some(
++          (r) => r.available === false || r.available === "invalid",
++        );
++        if (alreadyRuledOut) break;
++
+         const result =
+           src === "telegram"
+             ? opts.legacyWeb
+@@ -455,7 +470,15 @@ program
+     }
+ 
+     if (opts.outPath) {
+-      writeJson(opts.outPath, withPriceEstimates(results, priceEstimates));
++      const freeUsernames = new Set([
++        ...confirmedFree,
++        ...likelyFree,
++        ...partiallyChecked.map((item) => item.username),
++      ]);
++      const resultsForOutput = showTaken
++        ? results
++        : results.filter((r) => freeUsernames.has(r.username));
++      writeJson(opts.outPath, withPriceEstimates(resultsForOutput, priceEstimates));
+       console.log(`\nРезультаты сохранены в ${opts.outPath}`);
+     }
+   });
+@@ -520,6 +543,11 @@ program
+   .option("--estimate-price", "оценить цену обученной моделью (npm run train-price)", false)
+   .option("--delay <ms>", "пауза между запросами при проверке, мс", "2000")
+   .option("--out <path>", "куда сохранить кандидатов/результаты (JSON)")
++  .option(
++    "--show-taken",
++    "включить занятые/некорректные варианты в --out (по умолчанию скрыты)",
++    false,
++  )
+   .action(async (raw) => {
+     if (!generatorModelExists()) {
+       console.error("Модель генерации не найдена. Сначала обучите её: npm run train-generator");
+@@ -587,6 +615,11 @@ program
+     for (const candidate of candidates) {
+       const candidateResults: CheckResult[] = [];
+       for (const src of sourcesToCheck) {
++        const alreadyRuledOut = candidateResults.some(
++          (r) => r.available === false || r.available === "invalid",
++        );
++        if (alreadyRuledOut) break;
++
+         const result =
+           src === "telegram"
+             ? await checkTelegramMtproto(candidate.username, telegramClient!)
+@@ -619,7 +652,10 @@ program
+     }
+ 
+     if (raw.out) {
+-      writeJson(raw.out, withPriceEstimates(results, priceEstimates));
++      const resultsForOutput = Boolean(raw.showTaken)
++        ? results
++        : results.filter((r) => free.includes(r.username));
++      writeJson(raw.out, withPriceEstimates(resultsForOutput, priceEstimates));
+       console.log(`\nРезультаты сохранены в ${raw.out}`);
+     }
+   });
