@@ -15,6 +15,7 @@
  * закрывают именно этот пробел через словарь из dictionaryWords.ts.
  */
 
+import { POPULAR_TOKENS } from "../brandTokens.js";
 import { DICTIONARY_WORDS } from "./dictionaryWords.js";
 
 const VOWELS = new Set("aeiou");
@@ -24,39 +25,12 @@ const VOWELS = new Set("aeiou");
 // while containsDictionaryWord (substring, for longer/compound names) raises
 // the bar to 4+ characters.
 const MIN_SUBSTRING_WORD_LENGTH = 4;
-
-// Небольшой список токенов, которые на рынке крипто-ников заметно повышают
-// спрос (тематика TON/крипто, короткие бренды, ходовые слова). Список
-// неполный и субъективный — дополняйте по своим наблюдениям за реальными
-// продажами.
-const POPULAR_TOKENS = [
-  "ton",
-  "btc",
-  "eth",
-  "nft",
-  "coin",
-  "cash",
-  "pay",
-  "bank",
-  "shop",
-  "store",
-  "game",
-  "play",
-  "bot",
-  "ai",
-  "crypto",
-  "wallet",
-  "market",
-  "trade",
-  "vip",
-  "pro",
-  "king",
-  "boss",
-  "top",
-  "best",
-  "gold",
-  "moon",
-];
+// A full two-word split accounts for every character in the name, unlike
+// containsDictionaryWord's substring scan -- there's no leftover junk that
+// could make a short match coincidental. That makes 3-char halves (matching
+// DICTIONARY_WORDS' own whole-word floor, e.g. "top"+"shop") safe here even
+// though they'd be too noisy as a floating substring match.
+const MIN_COMPOUND_PART_LENGTH = 3;
 
 export const FEATURE_NAMES = [
   "length",
@@ -77,6 +51,7 @@ export const FEATURE_NAMES = [
   "hasPopularToken",
   "isDictionaryWord",
   "containsDictionaryWord",
+  "isTwoWordCompound",
   "startEndSameLetter",
 ] as const;
 
@@ -138,6 +113,28 @@ export function extractFeatures(usernameRaw: string): number[] {
 
   const startEndSameLetter = len > 0 && username[0] === username[len - 1] ? 1 : 0;
 
+  // Distinct from containsDictionaryWord: that fires on *any* embedded word,
+  // padded by junk on either side ("auto99" contains "auto" but is mostly
+  // digits). isTwoWordCompound is stricter -- it only fires when the *entire*
+  // alphabetic content splits cleanly into two real words ("goldshop" =
+  // "gold" + "shop") with nothing left over. That's exactly the pattern
+  // generator.ts's compound mode deliberately produces, and it reads as an
+  // intentional brand name rather than an accidental substring match.
+  let isTwoWordCompound = 0;
+  for (
+    let split = MIN_COMPOUND_PART_LENGTH;
+    split <= alphaOnly.length - MIN_COMPOUND_PART_LENGTH;
+    split++
+  ) {
+    if (
+      DICTIONARY_WORDS.has(alphaOnly.slice(0, split)) &&
+      DICTIONARY_WORDS.has(alphaOnly.slice(split))
+    ) {
+      isTwoWordCompound = 1;
+      break;
+    }
+  }
+
   return [
     len,
     len === 4 ? 1 : 0,
@@ -157,6 +154,7 @@ export function extractFeatures(usernameRaw: string): number[] {
     hasPopularToken,
     isDictionaryWord,
     containsDictionaryWord,
+    isTwoWordCompound,
     startEndSameLetter,
   ];
 }

@@ -30,6 +30,7 @@ import {
 } from "./priceModel/predict.js";
 import { trainGeneratorModel } from "./generatorModel/train.js";
 import { generateWithModel, generatorModelExists } from "./generatorModel/generate.js";
+import { randomDelayMs, safeModeRange } from "./pacing.js";
 
 const program = new Command();
 
@@ -44,6 +45,11 @@ function sleep(ms: number): Promise<void> {
 function jitter(baseMs: number): number {
   const spread = baseMs * 0.3;
   return baseMs + (Math.random() * spread * 2 - spread);
+}
+
+/** Пауза перед следующим запросом: широкий случайный диапазон в безопасном режиме, иначе обычный ±30% jitter. */
+function nextDelayMs(baseMs: number, safeMode: boolean): number {
+  return safeMode ? randomDelayMs(safeModeRange(baseMs)) : jitter(baseMs);
 }
 
 function writeJson(path: string, data: unknown): void {
@@ -159,7 +165,7 @@ program
   .command("search")
   .description("Сгенерировать кандидатов и проверить их доступность")
   .option("--source <source>", "telegram | fragment | both", "both")
-  .option("--mode <mode>", "readable | random | word | translit | both", "both")
+  .option("--mode <mode>", "readable | random | word | translit | dictionary | compound | both", "both")
   .option("--min-length <n>", "минимальная длина", "5")
   .option("--max-length <n>", "максимальная длина", "5")
   .option("--digits <policy>", "exclude | allow | require", "exclude")
@@ -172,6 +178,11 @@ program
     "any",
   )
   .option("--delay <ms>", "пауза между запросами, мс", "2000")
+  .option(
+    "--safe-mode",
+    "случайная широкая пауза между запросами вместо предсказуемого jitter (снижает риск flood-limit)",
+    false,
+  )
   .option("--out <path>", "куда сохранить результаты (JSON)")
   .option("--debug", "сохранять сырой HTML в ./debug для калибровки эвристик Fragment", false)
   .option("--dry-run", "только сгенерировать кандидатов, без сетевых запросов", false)
@@ -200,7 +211,9 @@ program
       console.error(`Неверный --source: ${source}`);
       process.exit(1);
     }
-    if (!["readable", "random", "word", "translit", "both"].includes(mode)) {
+    if (
+      !["readable", "random", "word", "translit", "dictionary", "compound", "both"].includes(mode)
+    ) {
       console.error(`Неверный --mode: ${mode}`);
       process.exit(1);
     }
@@ -244,6 +257,7 @@ program
       word: raw.word,
       wordPosition,
       delayMs: integerOption(raw.delay, "--delay", 0, 60_000),
+      safeMode: Boolean(raw.safeMode),
       outPath: raw.out,
       debug: Boolean(raw.debug),
       dryRun: Boolean(raw.dryRun),
@@ -339,6 +353,14 @@ program
       );
     }
 
+    if (opts.safeMode) {
+      const range = safeModeRange(opts.delayMs);
+      console.log(
+        `🛡️  Безопасный режим: пауза между запросами случайная, от ${Math.round(range.minMs / 1000)} ` +
+          `до ${Math.round(range.maxMs / 1000)} сек.\n`,
+      );
+    }
+
     const results: CheckResult[] = [];
 
     for (const candidate of candidates) {
@@ -364,7 +386,7 @@ program
         candidateResults.push(result);
         results.push(result);
 
-        await sleep(jitter(opts.delayMs));
+        await sleep(nextDelayMs(opts.delayMs, Boolean(opts.safeMode)));
       }
 
       console.log(formatCandidateLine(candidate.username, candidateResults));
@@ -526,10 +548,20 @@ program
 
 program
   .command("train-generator")
-  .description("Обучить нейросеть-генератор юзернеймов на избранном + собранной истории продаж")
+  .description(
+    "Обучить нейросеть-генератор юзернеймов на избранном + собранной истории продаж (с учётом цены) + словаре",
+  )
   .option("--epochs <n>", "число эпох обучения", "100")
+  .option(
+    "--dictionary-words <n>",
+    "сколько слов словаря подмешать как образец фонотактики (0 — отключить)",
+    "1200",
+  )
   .action((raw) => {
-    trainGeneratorModel({ epochs: integerOption(raw.epochs, "--epochs", 1, 5000) });
+    trainGeneratorModel({
+      epochs: integerOption(raw.epochs, "--epochs", 1, 5000),
+      dictionarySample: integerOption(raw.dictionaryWords, "--dictionary-words", 0, 8742),
+    });
   });
 
 program
@@ -542,6 +574,11 @@ program
   .option("--source <source>", "telegram | fragment | both — проверить доступность (по умолчанию не проверяет)")
   .option("--estimate-price", "оценить цену обученной моделью (npm run train-price)", false)
   .option("--delay <ms>", "пауза между запросами при проверке, мс", "2000")
+  .option(
+    "--safe-mode",
+    "случайная широкая пауза между запросами вместо предсказуемого jitter (снижает риск flood-limit)",
+    false,
+  )
   .option("--out <path>", "куда сохранить кандидатов/результаты (JSON)")
   .option(
     "--show-taken",
@@ -559,6 +596,7 @@ program
     const maxLength = integerOption(raw.maxLength, "--max-length", 5, 32);
     const temperature = numberOption(raw.temperature, "--temperature", 0, 3);
     const delayMs = integerOption(raw.delay, "--delay", 0, 60_000);
+    const safeMode = Boolean(raw.safeMode);
     if (minLength > maxLength) {
       console.error("--min-length не может быть больше --max-length");
       process.exit(1);
@@ -611,6 +649,14 @@ program
       telegramClient = await getClient();
     }
 
+    if (safeMode) {
+      const range = safeModeRange(delayMs);
+      console.log(
+        `🛡️  Безопасный режим: пауза между запросами случайная, от ${Math.round(range.minMs / 1000)} ` +
+          `до ${Math.round(range.maxMs / 1000)} сек.\n`,
+      );
+    }
+
     const results: CheckResult[] = [];
     for (const candidate of candidates) {
       const candidateResults: CheckResult[] = [];
@@ -626,7 +672,7 @@ program
             : await checkFragment(candidate.username, {});
         candidateResults.push(result);
         results.push(result);
-        await sleep(jitter(delayMs));
+        await sleep(nextDelayMs(delayMs, safeMode));
       }
       console.log(formatCandidateLine(candidate.username, candidateResults));
     }

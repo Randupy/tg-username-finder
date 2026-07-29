@@ -111,3 +111,58 @@ test("translit mode produces unique valid handles from complete Russian words", 
   assert.ok(candidates.every((candidate) => dictionary.has(candidate.username)));
   assert.deepEqual(generateTranslit(20, 5, 12, "require"), []);
 });
+
+test("dictionary mode produces unique valid handles that are themselves real words", () => {
+  const candidates = generateCandidates(
+    options({ mode: "dictionary", count: 25, minLength: 5, maxLength: 8, digits: "exclude" }),
+  );
+
+  assert.equal(candidates.length, 25);
+  assert.equal(new Set(candidates.map((candidate) => candidate.username)).size, 25);
+  assert.ok(candidates.every((candidate) => candidate.mode === "dictionary"));
+  assert.ok(candidates.every((candidate) => isValidTelegramUsername(candidate.username)));
+  assert.ok(candidates.every((candidate) => !/\d/.test(candidate.username)));
+  assert.ok(candidates.every((candidate) => candidate.username.length >= 5 && candidate.username.length <= 8));
+});
+
+test("dictionary mode with digits=require only appends a suffix, never mutates the word", () => {
+  const candidates = generateCandidates(
+    options({ mode: "dictionary", count: 15, minLength: 5, maxLength: 8, digits: "require" }),
+  );
+
+  assert.ok(candidates.length > 0);
+  for (const candidate of candidates) {
+    assert.ok(/\d/.test(candidate.username));
+    const word = candidate.username.replace(/\d+$/, "");
+    assert.ok(word.length >= 3, `expected a real word prefix, got "${candidate.username}"`);
+    assert.ok(!/\d/.test(word), `digits should only appear as a trailing suffix in "${candidate.username}"`);
+  }
+});
+
+test("compound mode combines two distinct tokens into one valid, unique handle", () => {
+  const candidates = generateCandidates(
+    options({ mode: "compound", count: 20, minLength: 6, maxLength: 12, digits: "exclude" }),
+  );
+
+  assert.ok(candidates.length > 0);
+  assert.equal(
+    new Set(candidates.map((candidate) => candidate.username)).size,
+    candidates.length,
+  );
+  assert.ok(candidates.every((candidate) => candidate.mode === "compound"));
+  assert.ok(candidates.every((candidate) => isValidTelegramUsername(candidate.username)));
+  assert.ok(
+    candidates.every(
+      (candidate) => candidate.username.length >= 6 && candidate.username.length <= 12,
+    ),
+  );
+});
+
+test("compound mode respects digits=require by appending, not by mangling the compound", () => {
+  const candidates = generateCandidates(
+    options({ mode: "compound", count: 10, minLength: 6, maxLength: 12, digits: "require" }),
+  );
+
+  assert.ok(candidates.length > 0);
+  assert.ok(candidates.every((candidate) => /\d/.test(candidate.username)));
+});

@@ -1,7 +1,15 @@
 export type Source = "telegram" | "fragment";
 export type SourceOption = Source | "both";
 
-export type GenMode = "readable" | "random" | "word" | "translit" | "both" | "ai";
+export type GenMode =
+  | "readable"
+  | "random"
+  | "word"
+  | "translit"
+  | "dictionary"
+  | "compound"
+  | "both"
+  | "ai";
 
 /**
  * Куда должно попасть пользовательское слово в режиме --mode word:
@@ -33,6 +41,8 @@ export interface SearchOptions {
   /** Где должно стоять слово внутри юзернейма — используется только с --mode word */
   wordPosition?: WordPosition;
   delayMs: number;
+  /** Случайная широкая пауза между запросами вместо предсказуемого ±30% jitter вокруг delayMs. */
+  safeMode?: boolean;
   outPath?: string;
   debug: boolean;
   dryRun: boolean;

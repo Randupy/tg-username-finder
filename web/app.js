@@ -14,7 +14,9 @@ const state = {
   route: "search",
   status: null,
   favorites: [],
-  favoriteFilter: "all",
+  favoriteSort: "added-desc",
+  resultSort: "default",
+  rates: null,
   jobs: [],
   currentJob: null,
   eventSource: null,
@@ -736,25 +738,123 @@ function sourceStatus(group, source) {
   return "unchecked";
 }
 
-function availabilityHtml(value, detail = "") {
-  const label = availabilityLabel(value);
-  const title = detail ? ` title="${escapeHtml(detail)}"` : "";
+const STATUS_RANK = { free: 0, unknown: 1, unchecked: 2, invalid: 3, busy: 4 };
+
+function combinedStatusRank(group) {
+  const telegram = STATUS_RANK[sourceStatus(group, "telegram")] ?? 2;
+  const fragment = STATUS_RANK[sourceStatus(group, "fragment")] ?? 2;
+  return Math.min(telegram, fragment);
+}
+
+function resultPriceTon(group) {
+  const resolved = resolvePrice(group.price);
+  return resolved ? resolved.ton : null;
+}
+
+function sortResultGroups(rows, sortKey) {
+  if (sortKey === "default") return rows;
+  const withIndex = rows.map((group, index) => ({ group, index }));
+  withIndex.sort((a, b) => {
+    switch (sortKey) {
+      case "username-asc":
+        return a.group.username.localeCompare(b.group.username);
+      case "username-desc":
+        return b.group.username.localeCompare(a.group.username);
+      case "status":
+        return combinedStatusRank(a.group) - combinedStatusRank(b.group) || a.index - b.index;
+      case "price-asc":
+      case "price-desc": {
+        const priceA = resultPriceTon(a.group);
+        const priceB = resultPriceTon(b.group);
+        if (priceA === null && priceB === null) return a.index - b.index;
+        if (priceA === null) return 1;
+        if (priceB === null) return -1;
+        return sortKey === "price-asc" ? priceA - priceB : priceB - priceA;
+      }
+      default:
+        return a.index - b.index;
+    }
+  });
+  return withIndex.map((item) => item.group);
+}
+
+// Вариант "B": вместо двух широких колонок Telegram/Fragment — один компактный
+// статус с двумя короткими бейджами TG/FR. Информация по каждой площадке не
+// теряется (видна в title при наведении), но освобождается место под цену
+// сразу в трёх валютах.
+function compactStatusHtml(group) {
+  const chip = (label, value, detail) => {
+    const tone = availabilityTone(value);
+    const title = `${label === "TG" ? "Telegram" : "Fragment"}: ${availabilityLabel(value)}${detail ? ` — ${detail}` : ""}`;
+    return `
+      <span class="status-compact__item status-compact__item--${escapeHtml(tone)}" title="${escapeHtml(title)}">
+        <span class="${dotClass(tone)}" aria-hidden="true"></span>${label}
+      </span>
+    `;
+  };
+  const telegram = sourceStatus(group, "telegram");
+  const fragment = sourceStatus(group, "fragment");
   return `
-    <span class="availability availability--${escapeHtml(value)}"${title}>
-      <span class="${dotClass(availabilityTone(value))}" aria-hidden="true"></span>
-      ${escapeHtml(label)}
+    <span class="status-compact">
+      ${chip("TG", telegram, group.telegram?.detail)}
+      ${chip("FR", fragment, group.fragment?.detail)}
     </span>
   `;
 }
 
-function priceLabel(price) {
-  if (price == null) return "—";
-  if (typeof price === "number") return `${formatNumber(price)} TON`;
-  if (isObject(price)) {
-    if (Number.isFinite(Number(price.ton))) return `≈ ${Number(price.ton).toFixed(1)} TON`;
-    if (Number.isFinite(Number(price.usd))) return `≈ $${Number(price.usd).toFixed(0)}`;
+function resolvePrice(price) {
+  const normalized = normalizeFavoritePrice(price);
+  if (!normalized) return null;
+  const resolved = { ton: normalized.ton, usd: normalized.usd, rub: normalized.rub };
+  if (resolved.usd === undefined && state.rates) {
+    resolved.usd = resolved.ton * state.rates.tonUsd;
   }
-  return String(price);
+  if (resolved.rub === undefined && state.rates) {
+    const usd = resolved.usd !== undefined ? resolved.usd : resolved.ton * state.rates.tonUsd;
+    resolved.rub = usd * state.rates.usdRub;
+  }
+  return resolved;
+}
+
+function formatTon(value) {
+  return `${formatNumber(Math.round(value * 100) / 100)} TON`;
+}
+
+function formatUsd(value) {
+  return `$${formatNumber(Math.round(value))}`;
+}
+
+function formatRub(value) {
+  return `₽${formatNumber(Math.round(value))}`;
+}
+
+function priceLabel(price) {
+  const resolved = resolvePrice(price);
+  if (!resolved) return "—";
+  const parts = [`≈ ${formatTon(resolved.ton)}`];
+  if (resolved.usd !== undefined) parts.push(`≈ ${formatUsd(resolved.usd)}`);
+  if (resolved.rub !== undefined) parts.push(`≈ ${formatRub(resolved.rub)}`);
+  return parts.join(" · ");
+}
+
+// Отдельные "чипы" на TON/USD/RUB вместо одной строки — если известен курс
+// (см. refreshRates), USD/RUB досчитываются на лету даже для старых записей,
+// у которых сохранён только TON.
+function priceChipsHtml(price) {
+  const resolved = resolvePrice(price);
+  if (!resolved) return "";
+  const chips = [`<span class="price-chip">≈ ${escapeHtml(formatTon(resolved.ton))}</span>`];
+  if (resolved.usd !== undefined) {
+    chips.push(
+      `<span class="price-chip price-chip--secondary">≈ ${escapeHtml(formatUsd(resolved.usd))}</span>`,
+    );
+  }
+  if (resolved.rub !== undefined) {
+    chips.push(
+      `<span class="price-chip price-chip--secondary">≈ ${escapeHtml(formatRub(resolved.rub))}</span>`,
+    );
+  }
+  return `<span class="price-breakdown">${chips.join("")}</span>`;
 }
 
 function normalizeFavoritePrice(price) {
@@ -793,10 +893,14 @@ function favoriteTimestamp(favorite) {
 
 function renderResults(result, job = null) {
   const mount = $("#results-content");
-  const rows = groupResults(result);
+  const rows = sortResultGroups(groupResults(result), state.resultSort);
   $("#results-count").textContent = rows.length
     ? `${formatNumber(rows.length)} ${rows.length === 1 ? "имя" : "имён"}`
     : "Нет структурированных данных";
+  const resultsSortSelect = $("#results-sort");
+  if (resultsSortSelect && resultsSortSelect.value !== state.resultSort) {
+    resultsSortSelect.value = state.resultSort;
+  }
   if (!rows.length) {
     const fallback =
       job?.status === "succeeded"
@@ -816,9 +920,9 @@ function renderResults(result, job = null) {
     <div class="result-table" role="table" aria-label="Результаты проверки">
       <div class="result-row result-header" role="row">
         <span role="columnheader">Юзернейм</span>
-        <span role="columnheader">Telegram</span>
-        <span role="columnheader">Fragment</span>
-        <span role="columnheader">Сигнал</span>
+        <span role="columnheader">Статус</span>
+        <span role="columnheader">Цена</span>
+        <span role="columnheader">Проверено</span>
         <span role="columnheader">Действие</span>
       </div>
       ${rows
@@ -832,24 +936,23 @@ function renderResults(result, job = null) {
           const confidence =
             group.telegram?.confidence || group.fragment?.confidence || group.confidence || null;
           const encodedPrice = encodeFavoritePrice(group.price);
-          const meta = [
-            confidence === "high" ? "Высокая точность" : confidence === "low" ? "Эвристика" : "Без оценки",
-            priceLabel(group.price),
-          ];
+          const confidenceLabel =
+            confidence === "high" ? "Высокая точность" : confidence === "low" ? "Эвристика" : "Без оценки";
+          const priceChips = priceChipsHtml(group.price);
           return `
             <div class="result-row" role="row">
               <div class="result-cell" role="cell" data-label="Юзернейм">
                 <span class="result-username">@${escapeHtml(group.username)}</span>
               </div>
-              <div class="result-cell" role="cell" data-label="Telegram">
-                ${availabilityHtml(telegram, group.telegram?.detail)}
+              <div class="result-cell" role="cell" data-label="Статус">
+                ${compactStatusHtml(group)}
               </div>
-              <div class="result-cell" role="cell" data-label="Fragment">
-                ${availabilityHtml(fragment, group.fragment?.detail)}
+              <div class="result-cell" role="cell" data-label="Цена">
+                ${priceChips || `<span class="result-meta">—</span>`}
               </div>
-              <div class="result-cell" role="cell" data-label="Сигнал">
+              <div class="result-cell" role="cell" data-label="Проверено">
                 <span class="result-meta">
-                  ${escapeHtml(meta[0])} · ${escapeHtml(meta[1])}
+                  ${escapeHtml(confidenceLabel)}
                   <small>${escapeHtml(checkedAt ? relativeDate(checkedAt) : "Время не указано")}</small>
                 </span>
               </div>
@@ -877,6 +980,24 @@ function favoritePayload(payload) {
   return toArray(isObject(payload) ? payload.favorites : []);
 }
 
+async function refreshRates({ silent = true } = {}) {
+  try {
+    const payload = await api("/api/rates");
+    if (isObject(payload) && Number.isFinite(Number(payload.tonUsd)) && Number.isFinite(Number(payload.usdRub))) {
+      state.rates = { tonUsd: Number(payload.tonUsd), usdRub: Number(payload.usdRub) };
+      renderFavorites();
+      if (state.currentJob) renderResults(state.currentJob.result, state.currentJob);
+    }
+    return state.rates;
+  } catch (error) {
+    // Курс TON — это улучшение отображения, а не критичная функция: без него
+    // просто показываем то, что уже сохранено (обычно TON, иногда и USD/RUB,
+    // если они были посчитаны на сервере в момент добавления в избранное).
+    if (!silent) showToast(errorMessage(error), "error");
+    return null;
+  }
+}
+
 async function refreshFavorites({ silent = false } = {}) {
   try {
     const payload = await api("/api/favorites");
@@ -896,32 +1017,60 @@ async function refreshFavorites({ silent = false } = {}) {
   }
 }
 
+function favoritePriceTon(favorite) {
+  const resolved = resolvePrice(favorite.price);
+  return resolved ? resolved.ton : null;
+}
+
+function sortFavorites(list, sortKey) {
+  const withIndex = list.map((favorite, index) => ({ favorite, index }));
+  withIndex.sort((a, b) => {
+    switch (sortKey) {
+      case "added-asc":
+        return favoriteTimestamp(a.favorite) - favoriteTimestamp(b.favorite);
+      case "username-asc":
+        return a.favorite.username.localeCompare(b.favorite.username);
+      case "username-desc":
+        return b.favorite.username.localeCompare(a.favorite.username);
+      case "price-asc":
+      case "price-desc": {
+        const priceA = favoritePriceTon(a.favorite);
+        const priceB = favoritePriceTon(b.favorite);
+        // Записи без известной цены всегда уходят в конец списка независимо
+        // от направления сортировки — иначе "дешевле" внезапно поднимало бы
+        // наверх записи, для которых цена просто не указана.
+        if (priceA === null && priceB === null) return a.index - b.index;
+        if (priceA === null) return 1;
+        if (priceB === null) return -1;
+        return sortKey === "price-asc" ? priceA - priceB : priceB - priceA;
+      }
+      case "added-desc":
+      default:
+        return favoriteTimestamp(b.favorite) - favoriteTimestamp(a.favorite);
+    }
+  });
+  return withIndex.map((item) => item.favorite);
+}
+
 function renderFavorites() {
   const mount = $("#favorites-content");
-  const all = [...state.favorites].sort(
-    (a, b) => favoriteTimestamp(b) - favoriteTimestamp(a),
-  );
-  const filtered =
-    state.favoriteFilter === "all"
-      ? all
-      : all.filter((favorite) => favorite.source === state.favoriteFilter);
-  $("#favorites-total").textContent = `${formatNumber(all.length)} сохранено`;
+  const sorted = sortFavorites(state.favorites, state.favoriteSort);
+  $("#favorites-total").textContent = `${formatNumber(sorted.length)} сохранено`;
+  const sortSelect = $("#favorites-sort");
+  if (sortSelect && sortSelect.value !== state.favoriteSort) sortSelect.value = state.favoriteSort;
 
-  if (!filtered.length) {
-    const message = all.length
-      ? "В выбранном источнике пока ничего нет."
-      : "Добавьте находку из результатов поиска или вручную через форму выше.";
+  if (!sorted.length) {
     mount.innerHTML = `
       <div class="empty-state">
         <span class="empty-code" aria-hidden="true">@+</span>
-        <h3>${all.length ? "Нет совпадений" : "Короткий список пуст"}</h3>
-        <p>${escapeHtml(message)}</p>
+        <h3>Короткий список пуст</h3>
+        <p>Добавьте находку из результатов поиска или вручную через форму выше.</p>
       </div>
     `;
     return;
   }
 
-  mount.innerHTML = `<div class="favorite-list">${filtered
+  mount.innerHTML = `<div class="favorite-list">${sorted
     .map(
       (favorite) => `
         <article class="favorite-item">
@@ -933,14 +1082,7 @@ function renderFavorites() {
             </time>
           </div>
           <div class="favorite-actions">
-            <span class="source-tag">${escapeHtml(
-              favorite.source === "fragment" ? "Fragment" : "Telegram",
-            )}</span>
-            ${
-              normalizeFavoritePrice(favorite.price)
-                ? `<span class="favorite-price">${escapeHtml(priceLabel(favorite.price))}</span>`
-                : ""
-            }
+            ${priceChipsHtml(favorite.price)}
             <button
               class="button button--danger button--small"
               type="button"
@@ -1242,6 +1384,7 @@ function bindSearchForm() {
       usePlaywright: checkboxValue(form, "usePlaywright"),
       legacyWeb: checkboxValue(form, "legacyWeb"),
       estimatePrice: checkboxValue(form, "estimatePrice"),
+      safeMode: checkboxValue(form, "safeMode"),
     };
     try {
       await startJob("search", params, form);
@@ -1276,8 +1419,12 @@ function bindModelForms() {
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       clearFormError(formId);
+      const params = { epochs: numberValue(form, "epochs", 100) };
+      if (type === "train-generator") {
+        params.dictionaryWords = numberValue(form, "dictionaryWords", 1200);
+      }
       try {
-        await startJob(type, { epochs: numberValue(form, "epochs", 100) }, form);
+        await startJob(type, params, form);
       } catch (error) {
         showFormError(formId, errorMessage(error));
       }
@@ -1301,6 +1448,7 @@ function bindModelForms() {
       source: aiForm.elements.source.value,
       delayMs: numberValue(aiForm, "delayMs", 2000),
       estimatePrice: checkboxValue(aiForm, "estimatePrice"),
+      safeMode: checkboxValue(aiForm, "safeMode"),
     };
     try {
       await startJob("generate-ai", params, aiForm);
@@ -1362,16 +1510,10 @@ function bindFavorites() {
     }
   });
 
-  $$("[data-favorite-filter]").forEach((button) => {
-    button.addEventListener("click", () => {
-      state.favoriteFilter = button.dataset.favoriteFilter;
-      $$("[data-favorite-filter]").forEach((item) => {
-        const active = item === button;
-        item.classList.toggle("is-active", active);
-        item.setAttribute("aria-pressed", String(active));
-      });
-      renderFavorites();
-    });
+  const sortSelect = $("#favorites-sort");
+  sortSelect.addEventListener("change", () => {
+    state.favoriteSort = sortSelect.value;
+    renderFavorites();
   });
 }
 
@@ -1565,12 +1707,21 @@ function bindGlobalActions() {
   });
 }
 
+function bindResultsSort() {
+  const select = $("#results-sort");
+  select.addEventListener("change", () => {
+    state.resultSort = select.value;
+    if (state.currentJob) renderResults(state.currentJob.result, state.currentJob);
+  });
+}
+
 async function initialize() {
   renderRoute();
   bindGlobalActions();
   bindSearchForm();
   bindModelForms();
   bindFavorites();
+  bindResultsSort();
   bindSetup();
   bindDelegatedActions();
 
@@ -1579,6 +1730,7 @@ async function initialize() {
     refreshFavorites({ silent: true }),
     refreshJobs({ silent: true }),
     refreshLogin({ silent: true }),
+    refreshRates({ silent: true }),
   ]);
   const statusResult = results[0];
   if (statusResult.status === "rejected" || !state.status) {

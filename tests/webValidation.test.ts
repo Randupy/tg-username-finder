@@ -141,9 +141,32 @@ test("builds collection, training, and AI-generation jobs", () => {
     validateJobRequest({ type: "train-generator", params: { epochs: "12" } }),
     {
       type: "train-generator",
-      args: ["train-generator", "--epochs", "12"],
+      args: ["train-generator", "--epochs", "12", "--dictionary-words", "1200"],
       expectsResult: false,
       totalUnits: 12,
+    },
+  );
+
+  assert.deepEqual(
+    validateJobRequest({
+      type: "train-generator",
+      params: { epochs: "12", dictionaryWords: 0 },
+    }),
+    {
+      type: "train-generator",
+      args: ["train-generator", "--epochs", "12", "--dictionary-words", "0"],
+      expectsResult: false,
+      totalUnits: 12,
+    },
+  );
+
+  assert.deepEqual(
+    validateJobRequest({ type: "train-price", params: { epochs: "50" } }),
+    {
+      type: "train-price",
+      args: ["train-price", "--epochs", "50"],
+      expectsResult: false,
+      totalUnits: 50,
     },
   );
 

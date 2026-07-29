@@ -145,6 +145,8 @@
                       <option value="readable">Читаемые</option>
                       <option value="random">Случайные</option>
                       <option value="translit">Русские слова → транслит</option>
+                      <option value="dictionary">Английские словарные слова</option>
+                      <option value="compound">Составные (слово + слово)</option>
                       <option value="word">С моим словом</option>
                     </select>
                   </div>
@@ -277,6 +279,13 @@
                         </span>
                       </label>
                       <label class="check-option">
+                        <input type="checkbox" name="safeMode" id="search-safe-mode">
+                        <span>
+                          <strong>Безопасный режим</strong>
+                          <small>Случайная широкая пауза между запросами вместо предсказуемой</small>
+                        </span>
+                      </label>
+                      <label class="check-option">
                         <input type="checkbox" name="usePlaywright">
                         <span>
                           <strong>Playwright для Fragment</strong>
@@ -342,6 +351,19 @@
               </div>
               <span id="results-count" class="count-label">Пока нет данных</span>
             </header>
+            <div class="filter-row">
+              <div class="field field--inline">
+                <label for="results-sort">Сортировка</label>
+                <select id="results-sort" name="resultsSort">
+                  <option value="default">По порядку генерации</option>
+                  <option value="status">Сначала свободные</option>
+                  <option value="username-asc">Юзернейм А→Я</option>
+                  <option value="username-desc">Юзернейм Я→А</option>
+                  <option value="price-desc">Цена: сначала дороже</option>
+                  <option value="price-asc">Цена: сначала дешевле</option>
+                </select>
+              </div>
+            </div>
             <div id="results-content">
               <div class="empty-state">
                 <span class="empty-code" aria-hidden="true">@_</span>
@@ -455,7 +477,7 @@
                 <span class="step-number">03</span>
                 <div>
                   <h3>Обучить генератор</h3>
-                  <p>Посимвольная модель учится на продажах и избранном.</p>
+                  <p>Посимвольная модель учится на продажах (со взвешиванием по цене) и словаре — без избранного.</p>
                 </div>
               </header>
               <form id="train-generator-form" class="compact-form" novalidate>
@@ -463,6 +485,18 @@
                   <label for="generator-epochs">Эпох обучения</label>
                   <input id="generator-epochs" name="epochs" type="number" min="1" max="5000" value="100">
                   <small id="generator-training-hint">Минимум 20 имён в общем корпусе.</small>
+                </div>
+                <div class="field">
+                  <label for="generator-dictionary-words">Слов словаря в корпус</label>
+                  <input
+                    id="generator-dictionary-words"
+                    name="dictionaryWords"
+                    type="number"
+                    min="0"
+                    max="8742"
+                    value="1200"
+                  >
+                  <small>Образец фонотактики настоящих слов; 0 — использовать только продажи.</small>
                 </div>
                 <div class="form-error" id="train-generator-form-error" role="alert" hidden></div>
                 <button
@@ -540,6 +574,13 @@
                 <span>
                   <strong>Оценить потенциальную цену</strong>
                   <small>Работает и без проверки доступности</small>
+                </span>
+              </label>
+              <label class="check-option check-option--compact">
+                <input type="checkbox" name="safeMode" id="ai-safe-mode">
+                <span>
+                  <strong>Безопасный режим</strong>
+                  <small>Случайная широкая пауза между запросами вместо предсказуемой</small>
                 </span>
               </label>
               <div class="form-error" id="generate-ai-form-error" role="alert" hidden></div>
@@ -642,16 +683,16 @@
 
           <section class="panel favorites-panel" aria-label="Список избранного">
             <div class="filter-row">
-              <div class="segmented-control" aria-label="Фильтр источника">
-                <button type="button" class="segment is-active" data-favorite-filter="all" aria-pressed="true">
-                  Все
-                </button>
-                <button type="button" class="segment" data-favorite-filter="telegram" aria-pressed="false">
-                  Telegram
-                </button>
-                <button type="button" class="segment" data-favorite-filter="fragment" aria-pressed="false">
-                  Fragment
-                </button>
+              <div class="field field--inline">
+                <label for="favorites-sort">Сортировка</label>
+                <select id="favorites-sort" name="favoritesSort">
+                  <option value="added-desc">Сначала новые</option>
+                  <option value="added-asc">Сначала старые</option>
+                  <option value="username-asc">Юзернейм А→Я</option>
+                  <option value="username-desc">Юзернейм Я→А</option>
+                  <option value="price-desc">Цена: сначала дороже</option>
+                  <option value="price-asc">Цена: сначала дешевле</option>
+                </select>
               </div>
             </div>
             <div id="favorites-content" aria-live="polite">

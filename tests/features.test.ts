@@ -46,3 +46,23 @@ test("containsDictionaryWord ignores matches shorter than the substring floor", 
 test("containsDictionaryWord is 0 for a name with no embedded dictionary word", () => {
   assert.equal(featureMap("qzxjkv").containsDictionaryWord, 0);
 });
+
+test("isTwoWordCompound fires only when the whole name splits cleanly into two dictionary words", () => {
+  assert.equal(featureMap("goldrush").isTwoWordCompound, 1);
+  assert.equal(featureMap("topshop").isTwoWordCompound, 1);
+});
+
+test("isTwoWordCompound is 0 for a single dictionary word, unlike containsDictionaryWord", () => {
+  // "auto" is a whole dictionary word (isDictionaryWord=1, containsDictionaryWord=1)
+  // but there is no way to split it into two separate dictionary words.
+  assert.equal(featureMap("auto").isDictionaryWord, 1);
+  assert.equal(featureMap("auto").isTwoWordCompound, 0);
+});
+
+test("isTwoWordCompound is 0 when a dictionary word is merely embedded in junk", () => {
+  // containsDictionaryWord fires here ("auto" is embedded), but the leftover
+  // "zw"/"z" on either side are not dictionary words themselves, so this is
+  // not a clean two-word compound.
+  assert.equal(featureMap("zwautoz").containsDictionaryWord, 1);
+  assert.equal(featureMap("zwautoz").isTwoWordCompound, 0);
+});

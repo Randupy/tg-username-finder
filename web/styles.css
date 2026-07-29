@@ -1191,6 +1191,56 @@ progress::-moz-progress-bar {
   height: 6px;
 }
 
+.status-compact {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.status-compact__item {
+  display: inline-flex;
+  min-height: 26px;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.5rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-muted-strong);
+  font-size: 0.66rem;
+  font-weight: 600;
+  letter-spacing: 0.03em;
+  white-space: nowrap;
+}
+
+.status-compact__item--success {
+  border-color: rgba(94, 231, 183, 0.28);
+  background: rgba(16, 185, 129, 0.08);
+  color: #a7f3d0;
+}
+
+.status-compact__item--danger {
+  border-color: rgba(251, 113, 133, 0.26);
+  background: rgba(159, 18, 57, 0.08);
+  color: #fecdd3;
+}
+
+.status-compact__item--warning {
+  border-color: rgba(248, 200, 106, 0.24);
+  background: rgba(180, 83, 9, 0.08);
+  color: #fde68a;
+}
+
+.status-compact__item--neutral {
+  border-color: var(--color-border);
+  background: rgba(148, 163, 184, 0.06);
+  color: var(--color-muted-strong);
+}
+
+.status-compact__item .status-dot {
+  width: 6px;
+  height: 6px;
+}
+
 .result-meta {
   display: flex;
   flex-direction: column;
@@ -1432,6 +1482,23 @@ progress::-moz-progress-bar {
   margin-bottom: var(--space-lg);
 }
 
+.field--inline {
+  display: flex;
+  align-items: center;
+  gap: var(--space-sm);
+}
+
+.field--inline label {
+  margin: 0;
+  color: #a7a3b4;
+  font-size: 0.72rem;
+  white-space: nowrap;
+}
+
+.field--inline select {
+  min-height: 40px;
+}
+
 .segmented-control {
   display: inline-grid;
   width: 100%;
@@ -1523,6 +1590,32 @@ progress::-moz-progress-bar {
   color: #a7f3d0;
   font-family: var(--font-mono);
   font-size: 0.65rem;
+}
+
+.price-breakdown {
+  display: inline-flex;
+  flex-wrap: wrap;
+  gap: 0.3rem;
+}
+
+.price-chip {
+  display: inline-flex;
+  min-height: 28px;
+  align-items: center;
+  padding: 0.2rem 0.55rem;
+  border: 1px solid rgba(52, 211, 153, 0.24);
+  border-radius: 999px;
+  background: rgba(16, 185, 129, 0.08);
+  color: #a7f3d0;
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  white-space: nowrap;
+}
+
+.price-chip--secondary {
+  border-color: rgba(148, 163, 184, 0.24);
+  background: rgba(148, 163, 184, 0.08);
+  color: #cbd5e1;
 }
 
 .favorite-actions {

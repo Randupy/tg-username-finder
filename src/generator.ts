@@ -1,3 +1,5 @@
+import { POPULAR_TOKENS } from "./brandTokens.js";
+import { DICTIONARY_WORDS } from "./priceModel/dictionaryWords.js";
 import type { DigitsPolicy, GeneratedCandidate, SearchOptions, WordPosition } from "./types.js";
 import { RUSSIAN_WORDS, transliterateRussian } from "./russianWords.js";
 
@@ -208,6 +210,159 @@ export function generateTranslit(
   return [...results].map((username) => ({ username, mode: "translit" as const }));
 }
 
+// Слова длиннее ~10 символов почти никогда не остаются словом целиком в
+// пределах обычного диапазона длин юзернейма (5–32, но реалистичный спрос —
+// 5–12), а для compound-режима им и вовсе не хватает места на вторую часть.
+const DICTIONARY_POOL = [...DICTIONARY_WORDS];
+const BRAND_TOKEN_POOL = [...new Set<string>(POPULAR_TOKENS)];
+
+/**
+ * dictionaryWords.ts — это сырой частотный список (google-10000-english),
+ * а не курируемый словарь: в нём полно аббревиатур без единой гласной (tmp,
+ * cms, jvc, dts) и обрывков, которые отлично работают как эвристика для
+ * priceModel/features.ts (там ложные срабатывания на редких словах почти
+ * не портят обучение на тысячах примеров), но режут глаз, если генератор
+ * лепит из них составные имена напрямую. Простой фонетический фильтр — есть
+ * хотя бы одна гласная и нет разбега согласных длиннее трёх подряд —
+ * отсеивает большую часть такого шума, не требуя вручную размеченного
+ * словаря частей речи.
+ */
+function looksPronounceable(word: string): boolean {
+  if (word.length < 3) return false;
+  let vowelCount = 0;
+  let consonantRun = 0;
+  let maxConsonantRun = 0;
+  for (const ch of word) {
+    if (VOWELS.includes(ch)) {
+      vowelCount++;
+      consonantRun = 0;
+    } else {
+      consonantRun++;
+      maxConsonantRun = Math.max(maxConsonantRun, consonantRun);
+    }
+  }
+  return vowelCount > 0 && vowelCount / word.length >= 0.2 && maxConsonantRun <= 3;
+}
+
+const COMPOUND_DICTIONARY_POOL = DICTIONARY_POOL.filter(
+  (w) => w.length >= 3 && w.length <= 8 && looksPronounceable(w),
+);
+
+/**
+ * Пытается пристроить требуемую цифру в конец уже готового "чистого" слова
+ * (словарного или составного), не обрезая и не портя само слово — в отличие
+ * от applyDigits, которая рассчитана на бессмысленные случайные строки и при
+ * нехватке места готова обрезать их с потерей смысла. Возвращает null, если
+ * места под цифру не осталось.
+ */
+function appendRequiredDigitSuffix(word: string, maxLen: number): string | null {
+  if (/\d/.test(word) || word.length >= maxLen) return null;
+  const digitsCount = Math.min(randomInt(1, 2), maxLen - word.length);
+  let suffix = "";
+  for (let i = 0; i < digitsCount; i++) suffix += pick(DIGITS.split(""));
+  return word + suffix;
+}
+
+/**
+ * Генерирует кандидатов, которые сами по себе являются настоящим,
+ * узнаваемым английским словом (опционально — с цифровым суффиксом при
+ * --digits require).
+ *
+ * Зачем это нужно: isDictionaryWord — один из главных факторов цены в
+ * priceModel/features.ts (см. комментарий там же: news/auto/bank/avia —
+ * реальные топовые продажи Fragment), но ни один другой режим генератора не
+ * производит такие имена намеренно — readable строит слоги, random выдаёт
+ * шум, а word требует, чтобы слово ввёл сам пользователь. Этот режим
+ * закрывает разрыв напрямую: генератор целится в тот же сигнал, который
+ * модель цены уже умеет распознавать.
+ */
+export function generateDictionary(
+  count: number,
+  minLen: number,
+  maxLen: number,
+  digits: DigitsPolicy,
+  validator: UsernameValidator = isValidTelegramUsername,
+): GeneratedCandidate[] {
+  const targetCount = requestedCount(count);
+  const range = validRange(minLen, maxLen);
+  if (targetCount === 0 || !range) return [];
+
+  const results = new Set<string>();
+  for (const word of shuffle(DICTIONARY_POOL)) {
+    if (results.size >= targetCount) break;
+
+    let candidate: string | null = word;
+    if (digits === "require") {
+      candidate = appendRequiredDigitSuffix(word, range.max);
+    }
+    if (!candidate) continue;
+    if (candidate.length < range.min || candidate.length > range.max) continue;
+    if (!validator(candidate)) continue;
+    results.add(candidate);
+  }
+
+  return [...results].map((username) => ({ username, mode: "dictionary" as const }));
+}
+
+/**
+ * Комбинирует два коротких токена — словарные слова и/или брендовые токены
+ * из brandTokens.ts (ton, gold, top, shop, pro, ...) — в один составной
+ * юзернейм ("goldshop", "topauto", "probank"). Целится сразу в два сигнала
+ * ценовой модели: hasPopularToken и новый isTwoWordCompound, вместо того
+ * чтобы полагаться на случай в слоговом или полностью случайном генераторе.
+ *
+ * Части намеренно не режутся и не искажаются политикой цифр — цифра (при
+ * --digits require) может только дописываться в конец уже готового
+ * составного слова, а не встраиваться в середину.
+ */
+export function generateCompound(
+  count: number,
+  minLen: number,
+  maxLen: number,
+  digits: DigitsPolicy,
+  validator: UsernameValidator = isValidTelegramUsername,
+): GeneratedCandidate[] {
+  const targetCount = requestedCount(count);
+  const range = validRange(minLen, maxLen);
+  if (targetCount === 0 || !range) return [];
+
+  // Каждой части нужно оставить место хотя бы для 2-символьного партнёра.
+  const maxPartLen = range.max - 2;
+  const dictionaryParts = COMPOUND_DICTIONARY_POOL.filter((w) => w.length <= maxPartLen);
+  const brandParts = BRAND_TOKEN_POOL.filter((w) => w.length <= maxPartLen);
+  const anyParts = [...new Set([...dictionaryParts, ...brandParts])];
+  if (anyParts.length < 2) return [];
+
+  const results = new Set<string>();
+  let guard = 0;
+  const maxGuard = targetCount * 200;
+
+  while (results.size < targetCount && guard < maxGuard) {
+    guard++;
+    // Половину попыток отдаём под "курируемый токен + словарное слово" —
+    // это надёжнее читается как осмысленный бренд (goldshop, topauto), чем
+    // случайная пара из всего 8.7k-словного частотного списка. Вторую
+    // половину оставляем полностью словарной для разнообразия.
+    const useBrandPair = brandParts.length > 0 && Math.random() < 0.5;
+    const first = useBrandPair ? pick(brandParts) : pick(anyParts);
+    const second = useBrandPair && dictionaryParts.length > 0 ? pick(dictionaryParts) : pick(anyParts);
+    const [a, b] = Math.random() < 0.5 ? [first, second] : [second, first];
+    if (a === b) continue;
+
+    let candidate: string | null = a + b;
+    if (candidate.length > range.max) continue;
+    if (digits === "require") {
+      candidate = appendRequiredDigitSuffix(candidate, range.max);
+    }
+    if (!candidate) continue;
+    if (candidate.length < range.min || candidate.length > range.max) continue;
+    if (!validator(candidate)) continue;
+    results.add(candidate);
+  }
+
+  return [...results].map((username) => ({ username, mode: "compound" as const }));
+}
+
 /**
  * Пытается воткнуть одну цифру в filler-символы (prefix/suffix), не трогая
  * само пользовательское слово и не ломая правило "первый символ — буква".
@@ -347,6 +502,12 @@ export function generateCandidates(opts: SearchOptions): GeneratedCandidate[] {
   }
   if (mode === "translit") {
     return generateTranslit(count, minLength, maxLength, digits, validator);
+  }
+  if (mode === "dictionary") {
+    return generateDictionary(count, minLength, maxLength, digits, validator);
+  }
+  if (mode === "compound") {
+    return generateCompound(count, minLength, maxLength, digits, validator);
   }
   if (mode !== "both") return [];
 

@@ -9,6 +9,7 @@ import { fileURLToPath } from "node:url";
 import { addFavorite, listFavorites, removeFavorite } from "../favorites.js";
 import { loadEnvFile } from "../mtproto/env.js";
 import { loadSoldHistory } from "../priceData/store.js";
+import { getRates } from "../rates.js";
 import { JobManager } from "./jobs.js";
 import { saveTelegramCredentials, TelegramLoginFlow } from "./loginFlow.js";
 import { normalizeFavoriteInput, validateJobRequest } from "./validation.js";
@@ -215,6 +216,19 @@ export function createWebServer(options: ServerOptions = {}): {
           },
           activeJob: jobs.getActive(),
         });
+        return;
+      }
+
+      if (pathname === "/api/rates" && method === "GET") {
+        // getRates() кэширует на диске и в процессе (15 мин) — тут не нужно
+        // своё дополнительное кэширование поверх.
+        try {
+          sendJson(res, 200, await getRates());
+        } catch (err) {
+          sendJson(res, 502, {
+            error: `Не удалось получить курс TON: ${err instanceof Error ? err.message : String(err)}`,
+          });
+        }
         return;
       }
 

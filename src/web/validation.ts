@@ -87,7 +87,7 @@ function validateSearch(params: JsonObject): ValidatedJob {
   );
   const mode = oneOf<Exclude<GenMode, "ai">>(
     params.mode,
-    ["readable", "random", "word", "translit", "both"],
+    ["readable", "random", "word", "translit", "dictionary", "compound", "both"],
     "both",
     "Режим",
   );
@@ -172,6 +172,7 @@ function validateSearch(params: JsonObject): ValidatedJob {
   pushFlag(args, asBoolean(params.legacyWeb), "--legacy-web");
   pushFlag(args, asBoolean(params.estimatePrice), "--estimate-price");
   pushFlag(args, asBoolean(params.dryRun), "--dry-run");
+  pushFlag(args, asBoolean(params.safeMode), "--safe-mode");
 
   return { type: "search", args, expectsResult: true, totalUnits: count };
 }
@@ -196,9 +197,20 @@ function validateTraining(
 ): ValidatedJob {
   const fallback = type === "train-price" ? 200 : 100;
   const epochs = asNumber(params.epochs, fallback, "Количество эпох", 1, 5000);
+  const args = [type, "--epochs", String(epochs)];
+  if (type === "train-generator") {
+    const dictionaryWords = asNumber(
+      params.dictionaryWords,
+      1200,
+      "Слов словаря",
+      0,
+      8742,
+    );
+    args.push("--dictionary-words", String(dictionaryWords));
+  }
   return {
     type,
-    args: [type, "--epochs", String(epochs)],
+    args,
     expectsResult: false,
     totalUnits: epochs,
   };
@@ -239,6 +251,7 @@ function validateGenerateAi(params: JsonObject): ValidatedJob {
     args.push("--source", source);
   }
   pushFlag(args, asBoolean(params.estimatePrice), "--estimate-price");
+  pushFlag(args, asBoolean(params.safeMode), "--safe-mode");
 
   return { type: "generate-ai", args, expectsResult: true, totalUnits: count };
 }

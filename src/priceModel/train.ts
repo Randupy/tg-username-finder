@@ -1,6 +1,7 @@
 import { MLP, type MLPJSON } from "../ml/mlp.js";
 import { loadSoldHistory } from "../priceData/store.js";
 import type { SoldRecord } from "../priceData/soldHistory.js";
+import { deterministicShuffle as sharedDeterministicShuffle } from "../random.js";
 import { writeJsonAtomic } from "../storage/atomic.js";
 import { extractFeatures, FEATURE_NAMES } from "./features.js";
 
@@ -72,25 +73,9 @@ function std(xs: number[], m: number): number {
   return result > 1e-12 ? result : 1;
 }
 
-function mulberry32(seed: number): () => number {
-  let state = seed | 0;
-  return () => {
-    state = (state + 0x6d2b79f5) | 0;
-    let value = Math.imul(state ^ (state >>> 15), 1 | state);
-    value = (value + Math.imul(value ^ (value >>> 7), 61 | value)) ^ value;
-    return ((value ^ (value >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
 /** Returns a shuffled copy; the caller's history remains untouched. */
 export function deterministicShuffle<T>(values: readonly T[], seed = DEFAULT_SPLIT_SEED): T[] {
-  const shuffled = [...values];
-  const random = mulberry32(seed);
-  for (let i = shuffled.length - 1; i > 0; i--) {
-    const j = Math.floor(random() * (i + 1));
-    [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-  }
-  return shuffled;
+  return sharedDeterministicShuffle(values, seed);
 }
 
 /**

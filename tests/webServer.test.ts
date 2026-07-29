@@ -33,6 +33,7 @@ const SERVER_SOURCE_FILES = [
   "src/storage/atomic.ts",
   "src/mtproto/env.ts",
   "src/priceData/store.ts",
+  "src/rates.ts",
 ] as const;
 
 function copyServerSources(isolatedRoot: string): void {
@@ -248,6 +249,19 @@ test("local server protects mutations and persists favorites inside an isolated 
     });
     assert.equal((status.body as any).models.price.exists, false);
     assert.equal((status.body as any).models.generator.exists, false);
+
+    // Курсы TON зависят от внешнего запроса к CoinGecko, недоступного в
+    // изолированной тестовой среде — проверяем только то, что маршрут
+    // подключён и отвечает предсказуемой формой (успех или явная 502), а не
+    // конкретные значения курса.
+    const rates = await httpJson(port, "/api/rates");
+    if (rates.status === 200) {
+      assert.equal(typeof (rates.body as any).tonUsd, "number");
+      assert.equal(typeof (rates.body as any).usdRub, "number");
+    } else {
+      assert.equal(rates.status, 502);
+      assert.equal(typeof (rates.body as any).error, "string");
+    }
 
     const rejectedHost = await httpJson(port, "/api/health", {
       hostHeader: "attacker.example",
