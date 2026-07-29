@@ -29,6 +29,8 @@ const SERVER_SOURCE_FILES = [
   "src/web/loginFlow.ts",
   "src/web/validation.ts",
   "src/favorites.ts",
+  "src/favoritesExport.ts",
+  "src/xlsxWriter.ts",
   "src/types.ts",
   "src/storage/atomic.ts",
   "src/mtproto/env.ts",
@@ -100,6 +102,45 @@ function httpJson(
     );
     req.once("error", rejectResponse);
     if (rawBody !== undefined) req.write(rawBody);
+    req.end();
+  });
+}
+
+interface HttpBinaryResponse {
+  status: number;
+  headers: Record<string, string | string[] | undefined>;
+  body: Buffer;
+}
+
+/** Like httpJson, but keeps the response as raw bytes — httpJson's setEncoding("utf-8")
+ *  would corrupt a binary payload like a .xlsx file. */
+function httpBinary(
+  port: number,
+  path: string,
+  options: { hostHeader?: string } = {},
+): Promise<HttpBinaryResponse> {
+  return new Promise<HttpBinaryResponse>((resolveResponse, rejectResponse) => {
+    const req = request(
+      {
+        hostname: "127.0.0.1",
+        port,
+        path,
+        method: "GET",
+        headers: { Host: options.hostHeader ?? `127.0.0.1:${port}` },
+      },
+      (res) => {
+        const chunks: Buffer[] = [];
+        res.on("data", (chunk: Buffer) => chunks.push(chunk));
+        res.on("end", () => {
+          resolveResponse({
+            status: res.statusCode ?? 0,
+            headers: res.headers,
+            body: Buffer.concat(chunks),
+          });
+        });
+      },
+    );
+    req.once("error", rejectResponse);
     req.end();
   });
 }
@@ -385,6 +426,111 @@ test("local server protects mutations and persists favorites inside an isolated 
       rmSync(foreignCwd, { recursive: true, force: true });
     } catch {
       // On Windows the test runner can briefly retain the former cwd handle.
+    }
+  }
+});
+
+test("GET /api/favorites/export.xlsx returns the full favorites list as a workbook", async () => {
+  const isolatedRoot = mkdtempSync(resolve(tmpdir(), "tg-username-web-export-"));
+  const previousCwd = process.cwd();
+  let server: import("node:http").Server | undefined;
+  let shutdown: (() => Promise<void>) | undefined;
+
+  try {
+    copyServerSources(isolatedRoot);
+    symlinkSync(
+      resolve(PROJECT_ROOT, "node_modules"),
+      resolve(isolatedRoot, "node_modules"),
+      "junction",
+    );
+    mkdirSync(resolve(isolatedRoot, "data"), { recursive: true });
+    writeFileSync(
+      resolve(isolatedRoot, "data", "sold-history.json"),
+      JSON.stringify([]),
+      "utf-8",
+    );
+    // Записан напрямую, а не через POST /api/favorites — этот тест проверяет
+    // экспорт целиком независимо от CRUD-путей, которые уже покрыты выше.
+    writeFileSync(
+      resolve(isolatedRoot, "favorites.json"),
+      JSON.stringify([
+        {
+          username: "coolvibe",
+          source: "telegram",
+          note: "звучное, короткое",
+          price: { ton: 125.5, usd: 380, rub: 29_000 },
+          addedAt: "2026-07-27T00:00:00.000Z",
+        },
+        {
+          username: "topauto",
+          source: "fragment",
+          addedAt: "2026-07-26T00:00:00.000Z",
+        },
+      ]),
+      "utf-8",
+    );
+    process.chdir(isolatedRoot);
+
+    const serverUrl = pathToFileURL(resolve(isolatedRoot, "src", "web", "server.ts")).href;
+    const { createWebServer } = await import(serverUrl) as typeof import("../src/web/server.js");
+    const app = createWebServer({ host: "127.0.0.1", port: 0 });
+    shutdown = app.shutdown;
+    server = app.server;
+    await new Promise<void>((resolveListen, rejectListen) => {
+      server!.once("error", rejectListen);
+      server!.listen(0, "127.0.0.1", () => {
+        server!.off("error", rejectListen);
+        resolveListen();
+      });
+    });
+    const address = server.address();
+    assert.ok(address && typeof address === "object");
+    const port = address.port;
+
+    const rejectedHost = await httpBinary(port, "/api/favorites/export.xlsx", {
+      hostHeader: "attacker.example",
+    });
+    assert.equal(rejectedHost.status, 403);
+
+    const exported = await httpBinary(port, "/api/favorites/export.xlsx");
+    assert.equal(exported.status, 200);
+    assert.equal(
+      exported.headers["content-type"],
+      "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    );
+    assert.match(
+      String(exported.headers["content-disposition"]),
+      /attachment; filename="favorites\.xlsx"/,
+    );
+    // ZIP-сигнатура "PK\x03\x04" — подтверждает, что это действительно
+    // валидный архив, а не JSON-ошибка или пустое тело.
+    assert.deepEqual(exported.body.subarray(0, 4), Buffer.from([0x50, 0x4b, 0x03, 0x04]));
+    // Записи упакованы без сжатия (STORED), поэтому XML-текст листа виден
+    // прямо в теле ответа — не нужен ZIP-ридер, чтобы проверить содержимое.
+    const containsUtf8 = (text: string) => exported.body.includes(Buffer.from(text, "utf-8"));
+    assert.ok(containsUtf8("coolvibe"), "должен содержать первый юзернейм");
+    assert.ok(containsUtf8("topauto"), "должен содержать второй юзернейм");
+    assert.ok(containsUtf8("звучное, короткое"), "должен содержать заметку с юникодом");
+    assert.ok(containsUtf8("Юзернейм"), "должен содержать заголовок колонки");
+  } finally {
+    if (shutdown) {
+      await shutdown();
+    } else if (server?.listening) {
+      await new Promise<void>((resolveClose, rejectClose) => {
+        server!.close((error) => (error ? rejectClose(error) : resolveClose()));
+      });
+    }
+    process.chdir(previousCwd);
+    const isolatedModules = resolve(isolatedRoot, "node_modules");
+    try {
+      if (existsSync(isolatedModules)) unlinkSync(isolatedModules);
+    } catch {
+      // Windows may briefly retain the junction while the TS loader shuts down.
+    }
+    try {
+      rmSync(isolatedRoot, { recursive: true, force: true });
+    } catch {
+      // Best effort: this is an OS-temp mirror containing no user data.
     }
   }
 });

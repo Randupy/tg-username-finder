@@ -622,7 +622,17 @@
               <h2 id="favorites-heading">Избранные юзернеймы</h2>
               <p>Соберите короткий список, добавьте контекст и вернитесь к лучшим вариантам позже.</p>
             </div>
-            <span class="precision-badge" id="favorites-total">0 сохранено</span>
+            <div class="favorites-header-actions">
+              <span class="precision-badge" id="favorites-total">0 сохранено</span>
+              <a
+                class="button button--secondary button--small"
+                id="favorites-export"
+                href="/api/favorites/export.xlsx"
+                download="favorites.xlsx"
+              >
+                Экспорт в .xlsx
+              </a>
+            </div>
           </header>
 
           <article class="panel favorite-add-panel">

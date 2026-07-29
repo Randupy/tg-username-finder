@@ -7,6 +7,7 @@ import {
 import { dirname, extname, resolve, sep } from "node:path";
 import { fileURLToPath } from "node:url";
 import { addFavorite, listFavorites, removeFavorite } from "../favorites.js";
+import { buildFavoritesXlsx } from "../favoritesExport.js";
 import { loadEnvFile } from "../mtproto/env.js";
 import { loadSoldHistory } from "../priceData/store.js";
 import { getRates } from "../rates.js";
@@ -80,6 +81,22 @@ function sendJson(res: ServerResponse, status: number, body: unknown): void {
 function sendError(res: ServerResponse, status: number, error: unknown): void {
   const message = error instanceof Error ? error.message : String(error);
   sendJson(res, status, { error: message });
+}
+
+function sendBinary(
+  res: ServerResponse,
+  status: number,
+  body: Buffer,
+  contentType: string,
+  filename: string,
+): void {
+  securityHeaders(res);
+  res.statusCode = status;
+  res.setHeader("Content-Type", contentType);
+  res.setHeader("Content-Disposition", `attachment; filename="${filename}"`);
+  res.setHeader("Content-Length", body.length);
+  res.setHeader("Cache-Control", "no-store");
+  res.end(body);
 }
 
 async function readJson(req: IncomingMessage): Promise<unknown> {
@@ -229,6 +246,21 @@ export function createWebServer(options: ServerOptions = {}): {
             error: `Не удалось получить курс TON: ${err instanceof Error ? err.message : String(err)}`,
           });
         }
+        return;
+      }
+
+      if (pathname === "/api/favorites/export.xlsx" && method === "GET") {
+        // Всегда всё избранное целиком, вне зависимости от фильтра/сортировки
+        // в интерфейсе — это отдельный полный экспорт, а не «вид как на экране».
+        const favorites = listFavorites(undefined, FAVORITES_PATH);
+        const workbook = buildFavoritesXlsx(favorites);
+        sendBinary(
+          res,
+          200,
+          workbook,
+          "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+          "favorites.xlsx",
+        );
         return;
       }
 
