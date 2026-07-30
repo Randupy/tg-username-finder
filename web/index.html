@@ -4,12 +4,13 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <meta name="color-scheme" content="dark">
-    <meta name="theme-color" content="#0B0B14">
+    <meta name="theme-color" content="#17212B">
     <meta
       name="description"
-      content="Локальный интерфейс Handle Radar для поиска свободных юзернеймов в Telegram и Fragment."
+      content="Token — локальная рабочая среда для поиска свободных юзернеймов в Telegram и Fragment."
     >
-    <title>Поиск — Handle Radar</title>
+    <title>Поиск — Token</title>
+    <link rel="icon" href="/assets/token-mark.svg" type="image/svg+xml">
     <link rel="stylesheet" href="/styles.css">
     <script src="/app.js" defer></script>
   </head>
@@ -17,31 +18,26 @@
     <a class="skip-link" href="#main-content">К основному содержимому</a>
 
     <div class="app-shell">
-      <aside class="sidebar" aria-label="Основная навигация">
-        <div class="brand">
-          <span class="brand-mark" aria-hidden="true">HR</span>
-          <span class="brand-copy">
-            <strong>Handle Radar</strong>
-            <small>username intelligence</small>
-          </span>
-        </div>
+      <header class="sidebar">
+        <a class="brand" href="#search" aria-label="Token — перейти к поиску">
+          <picture class="brand-logo" aria-hidden="true">
+            <source media="(max-width: 420px)" srcset="/assets/token-mark.svg">
+            <img src="/assets/token-logo.svg" alt="" width="152" height="40">
+          </picture>
+        </a>
 
-        <nav class="side-nav" aria-label="Разделы">
+        <nav class="side-nav" aria-label="Основные разделы">
           <a class="nav-link" data-route-link="search" href="#search">
             <span>Поиск</span>
-            <small>Проверка имён</small>
           </a>
           <a class="nav-link" data-route-link="models" href="#models">
             <span>Модели</span>
-            <small>Данные и обучение</small>
           </a>
           <a class="nav-link" data-route-link="favorites" href="#favorites">
             <span>Избранное</span>
-            <small>Сохранённые находки</small>
           </a>
           <a class="nav-link" data-route-link="setup" href="#setup">
             <span>Настройка</span>
-            <small>Telegram и доступ</small>
           </a>
         </nav>
 
@@ -49,21 +45,21 @@
           <div class="local-card">
             <span class="status-dot status-dot--neutral" id="sidebar-api-dot" aria-hidden="true"></span>
             <div>
-              <strong id="sidebar-api-label">Подключение…</strong>
+              <strong id="sidebar-api-label">API: подключение…</strong>
               <small>Данные остаются на этом компьютере</small>
             </div>
           </div>
-          <p class="version-label">local dashboard / v5</p>
+          <p class="version-label">Token / local v5</p>
         </div>
-      </aside>
+      </header>
 
       <header class="mobile-header">
-        <div class="brand brand--compact">
-          <span class="brand-mark" aria-hidden="true">HR</span>
-          <span class="brand-copy">
-            <strong>Handle Radar</strong>
-          </span>
-        </div>
+        <a class="brand brand--compact" href="#search" aria-label="Token — перейти к поиску">
+          <picture class="brand-logo" aria-hidden="true">
+            <source media="(max-width: 420px)" srcset="/assets/token-mark.svg">
+            <img src="/assets/token-logo.svg" alt="" width="152" height="40">
+          </picture>
+        </a>
         <span class="mobile-api-state" id="mobile-api-state">
           <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
           Подключение
@@ -73,11 +69,11 @@
       <main id="main-content" class="main-content" tabindex="-1">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Локальная рабочая станция</p>
+            <p class="eyebrow">Token · локальная рабочая среда</p>
             <h1 id="page-title">Поиск юзернеймов</h1>
           </div>
           <div class="topbar-meta">
-            <span class="privacy-note">Никакой облачной синхронизации</span>
+            <span class="privacy-note">Все данные остаются локально</span>
           </div>
         </header>
 
@@ -117,14 +113,14 @@
             <article class="panel search-panel">
               <header class="panel-heading search-heading">
                 <div>
-                  <p class="eyebrow">Discovery / 01</p>
-                  <h2 id="search-heading">Найдите имя, которое ещё свободно</h2>
+                  <p class="eyebrow">Поиск и проверка</p>
+                  <h2 id="search-heading">Найдите свободное имя</h2>
                   <p>
                     Создайте кандидатов и проверьте их через официальный Telegram MTProto,
                     Fragment или оба источника сразу.
                   </p>
                 </div>
-                <span class="precision-badge">live check</span>
+                <span class="precision-badge">Точная проверка</span>
               </header>
 
               <form id="search-form" class="form-stack" novalidate>
@@ -321,7 +317,7 @@
             </article>
 
             <aside class="panel insight-panel" aria-label="Контекст поиска">
-              <p class="eyebrow">Signal quality</p>
+              <p class="eyebrow">Источники сигнала</p>
               <h2>Проверка без догадок</h2>
               <div class="insight-list">
                 <div>
@@ -346,7 +342,7 @@
           <section class="panel results-panel" aria-labelledby="results-heading">
             <header class="section-heading">
               <div>
-                <p class="eyebrow">Output / live</p>
+                <p class="eyebrow">Результаты проверки</p>
                 <h2 id="results-heading">Результаты</h2>
               </div>
               <span id="results-count" class="count-label">Пока нет данных</span>
@@ -367,7 +363,7 @@
             <div id="results-content">
               <div class="empty-state">
                 <span class="empty-code" aria-hidden="true">@_</span>
-                <h3>Радар готов к первому запуску</h3>
+                <h3>Token готов к первому запуску</h3>
                 <p>Настройте параметры выше. Здесь появятся статусы Telegram и Fragment для каждого имени.</p>
               </div>
             </div>
@@ -377,13 +373,13 @@
         <section class="page-view" data-route-view="models" aria-labelledby="models-heading" hidden>
           <header class="page-intro">
             <div>
-              <p class="eyebrow">Intelligence / 02</p>
+              <p class="eyebrow">Данные и обучение</p>
               <h2 id="models-heading">Данные и локальные модели</h2>
               <p>
                 Соберите реальные продажи Fragment, обучите оценку цены и генератор — всё остаётся в проекте.
               </p>
             </div>
-            <span class="precision-badge">local ML</span>
+            <span class="precision-badge">Локальные модели</span>
           </header>
 
           <div class="metric-grid" id="model-metrics" aria-live="polite">
@@ -514,7 +510,7 @@
           <article class="panel ai-panel">
             <header class="panel-heading">
               <div>
-                <p class="eyebrow">Generate / neural</p>
+                <p class="eyebrow">Нейрогенерация</p>
                 <h2>Создать имена моделью</h2>
                 <p>Управляйте разнообразием через температуру и сразу отправляйте результат на проверку.</p>
               </div>
@@ -602,7 +598,7 @@
           <section class="panel history-panel" aria-labelledby="history-heading">
             <header class="section-heading">
               <div>
-                <p class="eyebrow">Queue / recent</p>
+                <p class="eyebrow">Очередь задач</p>
                 <h2 id="history-heading">Последние задачи</h2>
               </div>
               <button class="button button--quiet button--small" id="refresh-jobs" type="button">
@@ -618,7 +614,7 @@
         <section class="page-view" data-route-view="favorites" aria-labelledby="favorites-heading" hidden>
           <header class="page-intro">
             <div>
-              <p class="eyebrow">Shortlist / 03</p>
+              <p class="eyebrow">Короткий список</p>
               <h2 id="favorites-heading">Избранные юзернеймы</h2>
               <p>Соберите короткий список, добавьте контекст и вернитесь к лучшим вариантам позже.</p>
             </div>
@@ -718,7 +714,7 @@
         <section class="page-view" data-route-view="setup" aria-labelledby="setup-heading" hidden>
           <header class="page-intro">
             <div>
-              <p class="eyebrow">Connection / 04</p>
+              <p class="eyebrow">Подключение</p>
               <h2 id="setup-heading">Настройка Telegram</h2>
               <p>
                 API-ключи и строка сессии сохраняются только в локальных файлах проекта и не выводятся обратно в браузер.
@@ -732,7 +728,7 @@
               <header>
                 <span class="step-number">01</span>
                 <div>
-                  <h3>API credentials</h3>
+                  <h3>Данные Telegram API</h3>
                   <p>Получите API ID и API Hash в кабинете Telegram, затем сохраните их локально.</p>
                 </div>
               </header>
@@ -789,7 +785,7 @@
                 </div>
                 <div class="form-error" id="credentials-form-error" role="alert" hidden></div>
                 <button class="button button--secondary" type="submit" data-busy-label="Сохраняем…">
-                  Сохранить credentials
+                  Сохранить данные
                 </button>
               </form>
             </article>
@@ -880,7 +876,7 @@
           <article class="panel readiness-panel">
             <header class="section-heading">
               <div>
-                <p class="eyebrow">Readiness</p>
+                <p class="eyebrow">Готовность системы</p>
                 <h2>Готовность к точной проверке</h2>
               </div>
             </header>
@@ -903,10 +899,33 @@
       </main>
 
       <nav class="bottom-nav" aria-label="Мобильная навигация">
-        <a class="bottom-nav-link" data-route-link="search" href="#search">Поиск</a>
-        <a class="bottom-nav-link" data-route-link="models" href="#models">Модели</a>
-        <a class="bottom-nav-link" data-route-link="favorites" href="#favorites">Избранное</a>
-        <a class="bottom-nav-link" data-route-link="setup" href="#setup">Настройка</a>
+        <a class="bottom-nav-link" data-route-link="search" href="#search">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="11" cy="11" r="7"></circle>
+            <path d="m20 20-4-4"></path>
+          </svg>
+          <span>Поиск</span>
+        </a>
+        <a class="bottom-nav-link" data-route-link="models" href="#models">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <rect x="5" y="5" width="14" height="14" rx="3"></rect>
+            <path d="M9 9h6v6H9zM9 2v3M15 2v3M9 19v3M15 19v3M2 9h3M19 9h3M2 15h3M19 15h3"></path>
+          </svg>
+          <span>Модели</span>
+        </a>
+        <a class="bottom-nav-link" data-route-link="favorites" href="#favorites">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <path d="m12 3 2.8 5.7 6.2.9-4.5 4.4 1.1 6.2L12 17.3l-5.6 2.9 1.1-6.2L3 9.6l6.2-.9L12 3Z"></path>
+          </svg>
+          <span>Избранное</span>
+        </a>
+        <a class="bottom-nav-link" data-route-link="setup" href="#setup">
+          <svg viewBox="0 0 24 24" aria-hidden="true">
+            <circle cx="12" cy="12" r="3"></circle>
+            <path d="M19.4 15a1.7 1.7 0 0 0 .3 1.9l.1.1-2.8 2.8-.1-.1a1.7 1.7 0 0 0-1.9-.3 1.7 1.7 0 0 0-1 1.6v.2h-4V21a1.7 1.7 0 0 0-1-1.6 1.7 1.7 0 0 0-1.9.3l-.1.1L4.2 17l.1-.1a1.7 1.7 0 0 0 .3-1.9A1.7 1.7 0 0 0 3 14H2.8v-4H3a1.7 1.7 0 0 0 1.6-1 1.7 1.7 0 0 0-.3-1.9L4.2 7 7 4.2l.1.1A1.7 1.7 0 0 0 9 4.6a1.7 1.7 0 0 0 1-1.6v-.2h4V3a1.7 1.7 0 0 0 1 1.6 1.7 1.7 0 0 0 1.9-.3l.1-.1L19.8 7l-.1.1a1.7 1.7 0 0 0-.3 1.9 1.7 1.7 0 0 0 1.6 1h.2v4H21a1.7 1.7 0 0 0-1.6 1Z"></path>
+          </svg>
+          <span>Настройка</span>
+        </a>
       </nav>
     </div>
 

@@ -210,7 +210,7 @@ function renderRoute({ focus = false } = {}) {
     else link.removeAttribute("aria-current");
   });
   $("#page-title").textContent = ROUTE_TITLES[route];
-  document.title = `${ROUTE_TITLES[route]} — Handle Radar`;
+  document.title = `${ROUTE_TITLES[route]} — Token`;
   if (focus) {
     $("#main-content").focus({ preventScroll: true });
     window.scrollTo({ top: 0, behavior: "auto" });
@@ -295,10 +295,10 @@ function renderStatus() {
     readyModels === 2 ? "success" : readyModels > 0 ? "warning" : "neutral",
   );
 
-  $("#sidebar-api-label").textContent = "Локальный API на связи";
+  $("#sidebar-api-label").textContent = "API онлайн";
   $("#sidebar-api-dot").className = dotClass("success");
   $("#mobile-api-state").innerHTML =
-    `<span class="${dotClass("success")}" aria-hidden="true"></span>На связи`;
+    `<span class="${dotClass("success")}" aria-hidden="true"></span>API онлайн`;
 
   renderModelMetrics();
   renderReadiness();
@@ -307,7 +307,7 @@ function renderStatus() {
 
 function renderOffline(error) {
   setStatusChip("status-api", "API", "Нет связи", "danger");
-  $("#sidebar-api-label").textContent = "API недоступен";
+  $("#sidebar-api-label").textContent = "API офлайн";
   $("#sidebar-api-dot").className = dotClass("danger");
   $("#mobile-api-state").innerHTML =
     `<span class="${dotClass("danger")}" aria-hidden="true"></span>Нет связи`;
@@ -343,14 +343,14 @@ function renderModelMetrics() {
     ),
     metricCard(
       "Модель цены",
-      priceReady ? "online" : "offline",
+      priceReady ? "готова" : "не готова",
       priceReady ? "Оценка цены доступна в поиске." : "Сначала соберите данные и запустите обучение.",
       priceReady,
       modelTimestamp(models.price),
     ),
     metricCard(
       "AI-генератор",
-      generatorReady ? "online" : "offline",
+      generatorReady ? "готов" : "не готов",
       generatorReady ? "Нейрогенерация доступна." : "Обучите модель на продажах и избранном.",
       generatorReady,
       modelTimestamp(models.generator),
@@ -778,17 +778,29 @@ function sortResultGroups(rows, sortKey) {
   return withIndex.map((item) => item.group);
 }
 
-// Вариант "B": вместо двух широких колонок Telegram/Fragment — один компактный
-// статус с двумя короткими бейджами TG/FR. Информация по каждой площадке не
-// теряется (видна в title при наведении), но освобождается место под цену
-// сразу в трёх валютах.
+// Вместо двух широких колонок Telegram/Fragment — один компактный статус
+// с двумя читаемыми бейджами. Подробности остаются доступны в title/aria-label,
+// а в таблице освобождается место под цену сразу в трёх валютах.
 function compactStatusHtml(group) {
   const chip = (label, value, detail) => {
     const tone = availabilityTone(value);
+    const shortLabel = {
+      free: "Свободен",
+      busy: "Занят",
+      invalid: "Ошибка",
+      unchecked: "Не проверен",
+      unknown: "Нет данных",
+    }[value] || "Нет данных";
     const title = `${label === "TG" ? "Telegram" : "Fragment"}: ${availabilityLabel(value)}${detail ? ` — ${detail}` : ""}`;
     return `
-      <span class="status-compact__item status-compact__item--${escapeHtml(tone)}" title="${escapeHtml(title)}">
-        <span class="${dotClass(tone)}" aria-hidden="true"></span>${label}
+      <span
+        class="status-compact__item status-compact__item--${escapeHtml(tone)}"
+        title="${escapeHtml(title)}"
+        aria-label="${escapeHtml(title)}"
+      >
+        <span class="${dotClass(tone)}" aria-hidden="true"></span>
+        <span class="status-compact__source">${label}</span>
+        <span class="status-compact__label">${escapeHtml(shortLabel)}</span>
       </span>
     `;
   };
@@ -942,7 +954,10 @@ function renderResults(result, job = null) {
           return `
             <div class="result-row" role="row">
               <div class="result-cell" role="cell" data-label="Юзернейм">
-                <span class="result-username">@${escapeHtml(group.username)}</span>
+                <span
+                  class="result-username"
+                  title="@${escapeHtml(group.username)}"
+                >@${escapeHtml(group.username)}</span>
               </div>
               <div class="result-cell" role="cell" data-label="Статус">
                 ${compactStatusHtml(group)}
@@ -1075,8 +1090,16 @@ function renderFavorites() {
       (favorite) => `
         <article class="favorite-item">
           <div class="favorite-main">
-            <h3>@${escapeHtml(favorite.username)}</h3>
-            ${favorite.note ? `<p>${escapeHtml(favorite.note)}</p>` : ""}
+            <h3 title="@${escapeHtml(favorite.username)}">@${escapeHtml(favorite.username)}</h3>
+            ${
+              favorite.note
+                ? `<p>${escapeHtml(
+                    favorite.note === "Найдено через Handle Radar"
+                      ? "Найдено через Token"
+                      : favorite.note,
+                  )}</p>`
+                : ""
+            }
             <time datetime="${escapeHtml(favorite.addedAt || "")}">
               Добавлено ${escapeHtml(relativeDate(favorite.addedAt))}
             </time>
@@ -1661,7 +1684,7 @@ function bindDelegatedActions() {
         await addFavorite({
           username: resultFavorite.dataset.addResultFavorite,
           source: resultFavorite.dataset.resultSource || "telegram",
-          note: "Найдено через Handle Radar",
+          note: "Найдено через Token",
           price: decodeFavoritePrice(resultFavorite.dataset.resultPrice) || undefined,
         });
         resultFavorite.textContent = "Сохранено";
