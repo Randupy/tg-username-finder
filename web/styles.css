@@ -606,7 +606,7 @@ textarea:focus-visible {
 }
 
 .field-grid--primary {
-  grid-template-columns: 1.35fr 1.35fr 1fr 1fr 0.78fr;
+  grid-template-columns: 1.2fr 1.2fr 1.1fr 0.9fr 0.7fr 0.9fr;
 }
 
 .field-grid--advanced {
@@ -614,7 +614,7 @@ textarea:focus-visible {
 }
 
 .field-grid--ai {
-  grid-template-columns: repeat(6, minmax(0, 1fr));
+  grid-template-columns: repeat(7, minmax(0, 1fr));
 }
 
 .field {

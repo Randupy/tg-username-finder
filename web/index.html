@@ -199,6 +199,24 @@
                       required
                     >
                   </div>
+
+                  <div class="field">
+                    <label for="search-min-price-ton">Цена от, TON</label>
+                    <input
+                      id="search-min-price-ton"
+                      name="minPriceTon"
+                      type="number"
+                      inputmode="decimal"
+                      min="0"
+                      step="0.1"
+                      placeholder="не ограничено"
+                      autocomplete="off"
+                    >
+                    <small id="search-min-price-hint">
+                      Необязательно. Кандидатов сначала оценит ценовая модель — на Telegram/Fragment пойдут
+                      только те, кто дороже.
+                    </small>
+                  </div>
                 </div>
 
                 <div id="word-fields" class="word-fields" hidden>
@@ -564,7 +582,24 @@
                     value="2000"
                   >
                 </div>
+                <div class="field">
+                  <label for="ai-min-price-ton">Цена от, TON</label>
+                  <input
+                    id="ai-min-price-ton"
+                    name="minPriceTon"
+                    type="number"
+                    inputmode="decimal"
+                    min="0"
+                    step="0.1"
+                    placeholder="не ограничено"
+                    autocomplete="off"
+                  >
+                </div>
               </div>
+              <small id="ai-min-price-hint" class="form-hint">
+                Необязательно. Кандидатов нейросети сначала оценит ценовая модель — на проверку доступности
+                пойдут только те, кто дороже.
+              </small>
               <label class="check-option check-option--compact">
                 <input type="checkbox" name="estimatePrice">
                 <span>
