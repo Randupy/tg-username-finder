@@ -100,6 +100,14 @@ interface PriceFilterResult {
   checked: number;
 }
 
+interface PriceFilterBudget {
+  /** hardCap = min(requestedCount * hardCapMultiplier, hardCapMax). По умолчанию — как раньше, 30x/3000. */
+  hardCapMultiplier?: number;
+  hardCapMax?: number;
+  /** Сколько раз запрашивать у генератора новую пачку кандидатов. */
+  maxAttempts?: number;
+}
+
 /**
  * Оценивает кандидатов локальной ценовой моделью ДО сетевых проверок
  * Telegram/Fragment и оставляет только тех, чья предсказанная цена не ниже
@@ -112,18 +120,25 @@ interface PriceFilterResult {
  * до исчерпания пространства вариантов (генератор перестаёт возвращать новые
  * уникальные имена) или до `maxAttempts` попыток / `hardCap` проверенных
  * кандидатов, чтобы не уйти в бесконечный цикл при слишком строгом пороге.
+ *
+ * ВАЖНО: пока проверенных кандидатов меньше `hardCap`, результат — это одна
+ * случайная выборка из пространства генератора, а не его исчерпывающий обход.
+ * При низком pass rate (немного кандидатов дороже порога) число прошедших
+ * закономерно колеблется от запуска к запуску даже при неизменном пороге —
+ * это не баг сравнения, а статистика маленькой выборки.
  */
 async function collectPriceQualifiedCandidates(
   requestedCount: number,
   minPriceTon: number,
   generateBatch: (batchSize: number) => GeneratedCandidate[],
+  budget: PriceFilterBudget = {},
 ): Promise<PriceFilterResult> {
   const seen = new Set<string>();
   const qualified: GeneratedCandidate[] = [];
   const estimates = new Map<string, PricePrediction>();
   const batchSize = Math.max(requestedCount * 4, 40);
-  const hardCap = Math.min(requestedCount * 30, 3000);
-  const maxAttempts = 8;
+  const hardCap = Math.min(requestedCount * (budget.hardCapMultiplier ?? 30), budget.hardCapMax ?? 3000);
+  const maxAttempts = budget.maxAttempts ?? 8;
 
   let checked = 0;
   for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -400,15 +415,18 @@ program
       );
       candidates = filtered.qualified;
       priceEstimates = filtered.estimates;
+      const passRate = filtered.checked > 0 ? ((candidates.length / filtered.checked) * 100).toFixed(1) : "0";
       console.log(
         `Прошли ценовой фильтр: ${candidates.length} из ${opts.count} запрошенных ` +
-          `(оценено моделью: ${filtered.checked}, отсеяно по цене: ${filtered.checked - candidates.length}).\n`,
+          `(оценено моделью: ${filtered.checked}, отсеяно по цене: ${filtered.checked - candidates.length}, ` +
+          `pass rate ≈${passRate}%).\n`,
       );
       if (candidates.length < opts.count) {
         console.log(
-          "Не удалось набрать нужное количество кандидатов дороже порога — пространство вариантов " +
-            "для этих фильтров исчерпано или порог слишком высокий. Попробуйте снизить порог, " +
-            "расширить диапазон длины/цифр или увеличить --count.\n",
+          `Не удалось набрать нужное количество кандидатов дороже порога (прошло ${candidates.length} из ` +
+            `${filtered.checked} проверенных) — пространство вариантов для этих фильтров исчерпано, порог ` +
+            "слишком высокий, либо просто не повезло со случайной выборкой. Попробуйте перезапустить, " +
+            "снизить порог, расширить диапазон длины/цифр или увеличить --count.\n",
         );
       }
     } else {
@@ -757,20 +775,29 @@ program
         `Ценовой фильтр: от ${minPriceTon} TON — сначала оцениваю кандидатов нейросети локальной ` +
           "моделью цены (без сети), проверка доступности пойдёт только для тех, кто прошёл порог.\n",
       );
-      const filtered = await collectPriceQualifiedCandidates(count, minPriceTon, (batchSize) =>
-        generateWithModel(batchSize, minLength, maxLength, temperature),
+      const filtered = await collectPriceQualifiedCandidates(
+        count,
+        minPriceTon,
+        (batchSize) => generateWithModel(batchSize, minLength, maxLength, temperature),
+        // У нейросетевого генератора pass rate заметно ниже и шумнее, чем у детерминированного
+        // search: даём больше попыток/бюджет проверок, чтобы редкие "дорогие" варианты успевали
+        // накопиться, а не упирались в тот же потолок, что и обычный генератор.
+        { hardCapMultiplier: 100, hardCapMax: 6000, maxAttempts: 30 },
       );
       candidates = filtered.qualified;
       priceEstimates = filtered.estimates;
+      const passRate = filtered.checked > 0 ? ((candidates.length / filtered.checked) * 100).toFixed(1) : "0";
       console.log(
         `Прошли ценовой фильтр: ${candidates.length} из ${count} запрошенных ` +
-          `(оценено моделью: ${filtered.checked}, отсеяно по цене: ${filtered.checked - candidates.length}).\n`,
+          `(оценено моделью: ${filtered.checked}, отсеяно по цене: ${filtered.checked - candidates.length}, ` +
+          `pass rate ≈${passRate}%).\n`,
       );
       if (candidates.length < count) {
         console.log(
-          "Не удалось набрать нужное количество кандидатов дороже порога — модель либо исчерпала " +
-            "разнообразие вариантов, либо порог слишком высокий. Попробуйте снизить порог, " +
-            "увеличить temperature или расширить диапазон длины.\n",
+          `Не удалось набрать нужное количество кандидатов дороже порога (прошло ${candidates.length} из ` +
+            `${filtered.checked} проверенных). При низком pass rate это может быть обычным разбросом ` +
+            "случайной выборки — попробуйте просто перезапустить с теми же параметрами. Также помогает " +
+            "снизить порог, увеличить temperature или расширить диапазон длины.\n",
         );
       }
     } else {
