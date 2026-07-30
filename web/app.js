@@ -376,6 +376,15 @@ function updateModelButtons() {
     corpus >= 20
       ? `${formatNumber(corpus)} имён в общем корпусе.`
       : `Нужно ещё ${formatNumber(20 - corpus)} имён в продажах и избранном.`;
+
+  const priceReady = modelExists(state.status.models.price);
+  const priceReadyHint = priceReady
+    ? "Необязательно. Кандидатов сначала оценит ценовая модель — на проверку доступности пойдут только те, кто дороже."
+    : "Необязательно, но пока недоступно: сначала обучите ценовую модель на вкладке «Модели».";
+  const searchMinPriceHint = $("#search-min-price-hint");
+  if (searchMinPriceHint) searchMinPriceHint.textContent = priceReadyHint;
+  const aiMinPriceHint = $("#ai-min-price-hint");
+  if (aiMinPriceHint) aiMinPriceHint.textContent = priceReadyHint;
 }
 
 async function refreshStatus({ silent = false } = {}) {
@@ -401,6 +410,15 @@ function numberValue(form, name, fallback) {
   const field = form.elements.namedItem(name);
   const value = Number(field?.value);
   return Number.isFinite(value) ? value : fallback;
+}
+
+/** Как numberValue, но пустое поле означает «фильтр выключен» — возвращает undefined, а не 0/фолбэк. */
+function optionalNumberValue(form, name) {
+  const field = form.elements.namedItem(name);
+  const raw = String(field?.value ?? "").trim();
+  if (raw === "") return undefined;
+  const value = Number(raw);
+  return Number.isFinite(value) ? value : undefined;
 }
 
 function checkboxValue(form, name) {
@@ -1403,6 +1421,7 @@ function bindSearchForm() {
       word,
       wordPosition: form.elements.wordPosition.value,
       delayMs: numberValue(form, "delayMs", 2000),
+      minPriceTon: optionalNumberValue(form, "minPriceTon"),
       debug: checkboxValue(form, "debug"),
       usePlaywright: checkboxValue(form, "usePlaywright"),
       legacyWeb: checkboxValue(form, "legacyWeb"),
@@ -1470,6 +1489,7 @@ function bindModelForms() {
       temperature: numberValue(aiForm, "temperature", 0.8),
       source: aiForm.elements.source.value,
       delayMs: numberValue(aiForm, "delayMs", 2000),
+      minPriceTon: optionalNumberValue(aiForm, "minPriceTon"),
       estimatePrice: checkboxValue(aiForm, "estimatePrice"),
       safeMode: checkboxValue(aiForm, "safeMode"),
     };

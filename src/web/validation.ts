@@ -61,6 +61,19 @@ function asNumber(
   return parsed;
 }
 
+/** Как asNumber, но возвращает undefined, если поле не заполнено — для необязательных фильтров. */
+function asOptionalNumber(
+  value: unknown,
+  label: string,
+  min: number,
+  max: number,
+  integer = true,
+): number | undefined {
+  if (value === undefined || value === null) return undefined;
+  if (typeof value === "string" && value.trim() === "") return undefined;
+  return asNumber(value, 0, label, min, max, integer);
+}
+
 function oneOf<T extends string>(
   value: unknown,
   allowed: readonly T[],
@@ -125,6 +138,13 @@ function validateSearch(params: JsonObject): ValidatedJob {
     "any",
     "Позиция слова",
   );
+  const minPriceTon = asOptionalNumber(
+    params.minPriceTon,
+    "Минимальная цена, TON",
+    0,
+    1_000_000_000,
+    false,
+  );
 
   if (minLength > maxLength) {
     throw new Error("Минимальная длина не может быть больше максимальной");
@@ -147,6 +167,10 @@ function validateSearch(params: JsonObject): ValidatedJob {
     "--delay",
     String(delay),
   ];
+
+  if (minPriceTon !== undefined) {
+    args.push("--min-price-ton", String(minPriceTon));
+  }
 
   const charset = asString(params.charset);
   if (charset) {
@@ -222,6 +246,13 @@ function validateGenerateAi(params: JsonObject): ValidatedJob {
   const maxLength = asNumber(params.maxLength, 8, "Максимальная длина", 5, 32);
   const temperature = asNumber(params.temperature, 0.8, "Температура", 0, 3, false);
   const delay = asNumber(params.delayMs, 2000, "Задержка", 250, 60_000);
+  const minPriceTon = asOptionalNumber(
+    params.minPriceTon,
+    "Минимальная цена, TON",
+    0,
+    1_000_000_000,
+    false,
+  );
   if (minLength > maxLength) {
     throw new Error("Минимальная длина не может быть больше максимальной");
   }
@@ -239,6 +270,10 @@ function validateGenerateAi(params: JsonObject): ValidatedJob {
     "--delay",
     String(delay),
   ];
+
+  if (minPriceTon !== undefined) {
+    args.push("--min-price-ton", String(minPriceTon));
+  }
 
   const sourceRaw = asString(params.source);
   if (sourceRaw) {

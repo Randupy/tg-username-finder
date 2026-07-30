@@ -15,6 +15,7 @@ import type {
   DigitsPolicy,
   FavoritePrice,
   GenMode,
+  GeneratedCandidate,
   SearchOptions,
   Source,
   SourceOption,
@@ -88,6 +89,71 @@ function withPriceEstimates<T extends { username: string }>(
     const estimatedPrice = estimates.get(item.username);
     return estimatedPrice ? { ...item, estimatedPrice } : { ...item };
   });
+}
+
+interface PriceFilterResult {
+  /** Кандидаты, чья предсказанная цена не ниже порога — именно они пойдут на проверку доступности. */
+  qualified: GeneratedCandidate[];
+  /** Оценки цены, уже посчитанные в процессе фильтрации (переиспользуются в итоговом отчёте). */
+  estimates: Map<string, PricePrediction>;
+  /** Сколько кандидатов всего прогнали через ценовую модель. */
+  checked: number;
+}
+
+/**
+ * Оценивает кандидатов локальной ценовой моделью ДО сетевых проверок
+ * Telegram/Fragment и оставляет только тех, чья предсказанная цена не ниже
+ * `minPriceTon`. Предсказание — локальный MLP плюс закэшированный на 15 минут
+ * курс TON, поэтому это на порядки дешевле проверки доступности и не тратит
+ * лимиты Telegram/Fragment на заведомо недорогие варианты.
+ *
+ * Если после первой пачки кандидатов не набралось нужное количество,
+ * запрашивает у генератора следующие пачки — до `requestedCount` совпадений,
+ * до исчерпания пространства вариантов (генератор перестаёт возвращать новые
+ * уникальные имена) или до `maxAttempts` попыток / `hardCap` проверенных
+ * кандидатов, чтобы не уйти в бесконечный цикл при слишком строгом пороге.
+ */
+async function collectPriceQualifiedCandidates(
+  requestedCount: number,
+  minPriceTon: number,
+  generateBatch: (batchSize: number) => GeneratedCandidate[],
+): Promise<PriceFilterResult> {
+  const seen = new Set<string>();
+  const qualified: GeneratedCandidate[] = [];
+  const estimates = new Map<string, PricePrediction>();
+  const batchSize = Math.max(requestedCount * 4, 40);
+  const hardCap = Math.min(requestedCount * 30, 3000);
+  const maxAttempts = 8;
+
+  let checked = 0;
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (qualified.length >= requestedCount || checked >= hardCap) break;
+
+    const batch = generateBatch(batchSize);
+    const fresh = batch.filter((c) => !seen.has(c.username));
+    if (fresh.length === 0) break; // пространство вариантов для этих фильтров исчерпано
+
+    for (const candidate of fresh) {
+      seen.add(candidate.username);
+      if (qualified.length >= requestedCount || checked >= hardCap) break;
+
+      try {
+        const prediction = await predictPrice(candidate.username);
+        checked++;
+        if (prediction.ton >= minPriceTon) {
+          qualified.push(candidate);
+          estimates.set(candidate.username, prediction);
+        }
+      } catch (err) {
+        checked++;
+        console.log(
+          `  ⚠️  ${candidate.username} — не удалось оценить цену (${err instanceof Error ? err.message : err}), пропускаю.`,
+        );
+      }
+    }
+  }
+
+  return { qualified, estimates, checked };
 }
 
 function integerOption(
@@ -198,6 +264,10 @@ program
     false,
   )
   .option(
+    "--min-price-ton <ton>",
+    "проверять доступность только у кандидатов, чья предсказанная цена не ниже этого порога (требует npm run train-price)",
+  )
+  .option(
     "--show-taken",
     "включить занятые/некорректные варианты в --out и таблицу результатов (по умолчанию скрыты)",
     false,
@@ -224,6 +294,18 @@ program
     if (mode === "translit" && digits === "require") {
       console.error(
         "--mode translit генерирует точный транслит одного русского существительного и не добавляет цифры. Используйте --digits exclude или allow.",
+      );
+      process.exit(1);
+    }
+
+    const minPriceTon =
+      raw.minPriceTon === undefined
+        ? undefined
+        : numberOption(raw.minPriceTon, "--min-price-ton", 0, 1_000_000_000);
+    if (minPriceTon !== undefined && !priceModelExists()) {
+      console.error(
+        "--min-price-ton требует обученную ценовую модель. Сначала соберите данные " +
+          "(npm run collect-sales) и обучите модель (npm run train-price).",
       );
       process.exit(1);
     }
@@ -305,26 +387,60 @@ program
       `Генерирую кандидатов: mode=${opts.mode}, длина=${opts.minLength}-${opts.maxLength}, digits=${opts.digits}, count=${opts.count}\n`,
     );
 
-    const candidates = generateCandidates(opts);
-    console.log(`Сгенерировано уникальных кандидатов: ${candidates.length}\n`);
+    let candidates: GeneratedCandidate[];
+    let priceEstimates = new Map<string, PricePrediction>();
+
+    if (minPriceTon !== undefined) {
+      console.log(
+        `Ценовой фильтр: от ${minPriceTon} TON — сначала оцениваю кандидатов локальной моделью ` +
+          "(без сети), проверка доступности пойдёт только для тех, кто прошёл порог.\n",
+      );
+      const filtered = await collectPriceQualifiedCandidates(opts.count, minPriceTon, (batchSize) =>
+        generateCandidates({ ...opts, count: batchSize }),
+      );
+      candidates = filtered.qualified;
+      priceEstimates = filtered.estimates;
+      console.log(
+        `Прошли ценовой фильтр: ${candidates.length} из ${opts.count} запрошенных ` +
+          `(оценено моделью: ${filtered.checked}, отсеяно по цене: ${filtered.checked - candidates.length}).\n`,
+      );
+      if (candidates.length < opts.count) {
+        console.log(
+          "Не удалось набрать нужное количество кандидатов дороже порога — пространство вариантов " +
+            "для этих фильтров исчерпано или порог слишком высокий. Попробуйте снизить порог, " +
+            "расширить диапазон длины/цифр или увеличить --count.\n",
+        );
+      }
+    } else {
+      candidates = generateCandidates(opts);
+      console.log(`Сгенерировано уникальных кандидатов: ${candidates.length}\n`);
+      if (candidates.length < opts.count) {
+        console.log(
+          `Получилось меньше запрошенного (${candidates.length} из ${opts.count}): ` +
+            "пространство вариантов слишком узкое для выбранных фильтров.\n",
+        );
+      }
+    }
+
     if (candidates.length === 0) {
-      console.error("Не удалось сгенерировать ни одного кандидата с этими параметрами.");
+      console.error(
+        minPriceTon !== undefined
+          ? "Ни один кандидат не прошёл ценовой фильтр с этими параметрами."
+          : "Не удалось сгенерировать ни одного кандидата с этими параметрами.",
+      );
       process.exitCode = 1;
       return;
-    }
-    if (candidates.length < opts.count) {
-      console.log(
-        `Получилось меньше запрошенного (${candidates.length} из ${opts.count}): ` +
-          "пространство вариантов слишком узкое для выбранных фильтров.\n",
-      );
     }
 
     if (opts.dryRun) {
       for (const c of candidates) {
-        console.log(`  [${c.mode}] ${c.username}`);
+        const priceLabel = priceEstimates.has(c.username)
+          ? ` — ≈${priceEstimates.get(c.username)!.ton.toFixed(1)} TON`
+          : "";
+        console.log(`  [${c.mode}] ${c.username}${priceLabel}`);
       }
       if (opts.outPath) {
-        writeJson(opts.outPath, candidates);
+        writeJson(opts.outPath, withPriceEstimates(candidates, priceEstimates));
         console.log(`\nКандидаты сохранены в ${opts.outPath}`);
       }
       return;
@@ -461,22 +577,37 @@ program
       ...partiallyChecked.map((item) => item.username),
     ];
 
-    let priceEstimates = new Map<string, PricePrediction>();
     if (availableForEstimate.length > 0) {
       console.log(
         `\nЧтобы добавить в избранное: npm run favorites -- add <username> --source telegram`,
       );
 
-      if (raw.estimatePrice) {
+      // Ценовой фильтр уже оценил всех кандидатов, дошедших до проверки
+      // доступности, — пересчитывать их ещё раз не нужно.
+      const missing = availableForEstimate.filter((u) => !priceEstimates.has(u));
+      const wantsEstimate = Boolean(raw.estimatePrice) || minPriceTon !== undefined;
+
+      if (missing.length > 0 && wantsEstimate) {
         if (!priceModelExists()) {
           console.log(
             "\n⚠️  --estimate-price: модель оценки цены ещё не обучена. Соберите данные " +
               "(npm run collect-sales) и обучите модель (npm run train-price), затем повторите поиск.",
           );
         } else {
-          priceEstimates = await estimatePrices(
-            availableForEstimate,
+          const newEstimates = await estimatePrices(
+            missing,
             "Примерная оценка цены (обученная модель, ориентируйтесь на порядок величины):",
+          );
+          for (const [username, prediction] of newEstimates) priceEstimates.set(username, prediction);
+        }
+      } else if (minPriceTon !== undefined && priceEstimates.size > 0) {
+        console.log("\nОценка цены (посчитана на этапе ценового фильтра):");
+        for (const username of availableForEstimate) {
+          const prediction = priceEstimates.get(username);
+          if (!prediction) continue;
+          console.log(
+            `  ${username} — ≈${prediction.ton.toFixed(1)} TON ` +
+              `(≈$${prediction.usd.toFixed(2)} / ≈₽${prediction.rub.toFixed(0)})`,
           );
         }
       }
@@ -573,6 +704,10 @@ program
   .option("--temperature <t>", "0 = всегда самый вероятный символ, выше — разнообразнее/случайнее", "0.8")
   .option("--source <source>", "telegram | fragment | both — проверить доступность (по умолчанию не проверяет)")
   .option("--estimate-price", "оценить цену обученной моделью (npm run train-price)", false)
+  .option(
+    "--min-price-ton <ton>",
+    "проверять доступность только у кандидатов, чья предсказанная цена не ниже этого порога (требует npm run train-price)",
+  )
   .option("--delay <ms>", "пауза между запросами при проверке, мс", "2000")
   .option(
     "--safe-mode",
@@ -601,12 +736,54 @@ program
       console.error("--min-length не может быть больше --max-length");
       process.exit(1);
     }
-    const candidates = generateWithModel(count, minLength, maxLength, temperature);
-    console.log(`Сгенерировано нейросетью: ${candidates.length}\n`);
+
+    const minPriceTon =
+      raw.minPriceTon === undefined
+        ? undefined
+        : numberOption(raw.minPriceTon, "--min-price-ton", 0, 1_000_000_000);
+    if (minPriceTon !== undefined && !priceModelExists()) {
+      console.error(
+        "--min-price-ton требует обученную ценовую модель. Сначала соберите данные " +
+          "(npm run collect-sales) и обучите модель (npm run train-price).",
+      );
+      process.exit(1);
+    }
+
+    let candidates: GeneratedCandidate[];
+    let priceEstimates = new Map<string, PricePrediction>();
+
+    if (minPriceTon !== undefined) {
+      console.log(
+        `Ценовой фильтр: от ${minPriceTon} TON — сначала оцениваю кандидатов нейросети локальной ` +
+          "моделью цены (без сети), проверка доступности пойдёт только для тех, кто прошёл порог.\n",
+      );
+      const filtered = await collectPriceQualifiedCandidates(count, minPriceTon, (batchSize) =>
+        generateWithModel(batchSize, minLength, maxLength, temperature),
+      );
+      candidates = filtered.qualified;
+      priceEstimates = filtered.estimates;
+      console.log(
+        `Прошли ценовой фильтр: ${candidates.length} из ${count} запрошенных ` +
+          `(оценено моделью: ${filtered.checked}, отсеяно по цене: ${filtered.checked - candidates.length}).\n`,
+      );
+      if (candidates.length < count) {
+        console.log(
+          "Не удалось набрать нужное количество кандидатов дороже порога — модель либо исчерпала " +
+            "разнообразие вариантов, либо порог слишком высокий. Попробуйте снизить порог, " +
+            "увеличить temperature или расширить диапазон длины.\n",
+        );
+      }
+    } else {
+      candidates = generateWithModel(count, minLength, maxLength, temperature);
+      console.log(`Сгенерировано нейросетью: ${candidates.length}\n`);
+    }
+
     if (candidates.length === 0) {
       console.error(
-        "Модель не смогла сгенерировать кандидатов с этими параметрами. " +
-          "Попробуйте увеличить temperature/диапазон длины или дообучить модель.",
+        minPriceTon !== undefined
+          ? "Ни один кандидат нейросети не прошёл ценовой фильтр с этими параметрами."
+          : "Модель не смогла сгенерировать кандидатов с этими параметрами. " +
+              "Попробуйте увеличить temperature/диапазон длины или дообучить модель.",
       );
       process.exitCode = 1;
       return;
@@ -614,10 +791,13 @@ program
 
     if (!raw.source) {
       for (const c of candidates) {
-        console.log(`  ${c.username}`);
+        const priceLabel = priceEstimates.has(c.username)
+          ? ` — ≈${priceEstimates.get(c.username)!.ton.toFixed(1)} TON`
+          : "";
+        console.log(`  ${c.username}${priceLabel}`);
       }
-      let priceEstimates = new Map<string, PricePrediction>();
-      if (raw.estimatePrice) {
+      const wantsEstimate = Boolean(raw.estimatePrice) || minPriceTon !== undefined;
+      if (wantsEstimate && priceEstimates.size === 0) {
         if (!priceModelExists()) {
           console.log(
             "\n⚠️  --estimate-price: модель цены ещё не обучена (npm run train-price).",
@@ -686,14 +866,28 @@ program
         return rs.length === sourcesToCheck.length && rs.every((r) => r.available === true);
       });
 
-    let priceEstimates = new Map<string, PricePrediction>();
-    if (free.length > 0 && raw.estimatePrice) {
-      if (!priceModelExists()) {
-        console.log(
-          "\n⚠️  --estimate-price: модель цены ещё не обучена (npm run train-price).",
-        );
-      } else {
-        priceEstimates = await estimatePrices(free, "Примерная оценка цены:");
+    if (free.length > 0) {
+      const missing = free.filter((u) => !priceEstimates.has(u));
+      const wantsEstimate = Boolean(raw.estimatePrice) || minPriceTon !== undefined;
+      if (missing.length > 0 && wantsEstimate) {
+        if (!priceModelExists()) {
+          console.log(
+            "\n⚠️  --estimate-price: модель цены ещё не обучена (npm run train-price).",
+          );
+        } else {
+          const newEstimates = await estimatePrices(missing, "Примерная оценка цены:");
+          for (const [username, prediction] of newEstimates) priceEstimates.set(username, prediction);
+        }
+      } else if (minPriceTon !== undefined && priceEstimates.size > 0) {
+        console.log("\nОценка цены (посчитана на этапе ценового фильтра):");
+        for (const username of free) {
+          const prediction = priceEstimates.get(username);
+          if (!prediction) continue;
+          console.log(
+            `  ${username} — ≈${prediction.ton.toFixed(1)} TON ` +
+              `(≈$${prediction.usd.toFixed(2)} / ≈₽${prediction.rub.toFixed(0)})`,
+          );
+        }
       }
     }
 
