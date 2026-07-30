@@ -1,6 +1,6 @@
 <div align="center">
 
-# Handle Radar
+# Token
 
 ### Telegram & Fragment Username Intelligence
 
@@ -8,22 +8,22 @@
 
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-![Tests](https://img.shields.io/badge/tests-52%20passing-22C55E?style=flat-square)
-![Access](https://img.shields.io/badge/access-localhost%20only-6D5EF7?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-74%20passing-22C55E?style=flat-square)
+![Access](https://img.shields.io/badge/access-localhost%20only-2AABEE?style=flat-square)
 ![Repository](https://img.shields.io/badge/repository-private-111827?style=flat-square&logo=github)
 
 </div>
 
 ---
 
-**Handle Radar** объединяет современный браузерный интерфейс и полноценный CLI. Он генерирует кандидатов, проверяет доступность в Telegram и на Fragment, сохраняет избранное, собирает публичную историю продаж и обучает локальные модели — без облачной панели и передачи учётных данных третьим лицам.
+**Token** объединяет современный браузерный интерфейс и полноценный CLI. Он генерирует кандидатов, проверяет доступность в Telegram и на Fragment, сохраняет избранное, собирает публичную историю продаж и обучает локальные модели — без облачной панели и передачи учётных данных третьим лицам.
 
 > [!IMPORTANT]
 > Приложение помогает исследовать доступность имён, но не регистрирует и не покупает их автоматически. Перед регистрацией или покупкой всегда перепроверяйте результат на официальной площадке.
 
 ## Возможности
 
-| Направление | Что умеет Handle Radar |
+| Направление | Что умеет Token |
 |---|---|
 | **Поиск** | Слоговые, случайные, word-based, транслит, словарные и составные генераторы; длина, цифры, алфавит, позиция слова |
 | **Telegram** | Официальная проверка через `account.checkUsername` и разовая MTProto-авторизация |
@@ -60,7 +60,7 @@ Copy-Item .env.example .env
 # 3. Заполнить TG_API_ID и TG_API_HASH, затем авторизоваться
 npm run login
 
-# 4. Запустить Handle Radar
+# 4. Запустить Token
 npm run web
 ```
 
@@ -276,7 +276,7 @@ npm run favorites -- list --source telegram
 npm run favorites -- remove coolvibe --source telegram
 ```
 
-Данные хранятся локально в `favorites.json`. Каждая запись может содержать цену в TON и конвертацию в USD/RUB, если имя было добавлено из результата с оценкой цены. Ручное добавление через Handle Radar также содержит необязательное поле **«Цена, TON»**.
+Данные хранятся локально в `favorites.json`. Каждая запись может содержать цену в TON и конвертацию в USD/RUB, если имя было добавлено из результата с оценкой цены. Ручное добавление через Token также содержит необязательное поле **«Цена, TON»**.
 
 Избранное всегда выводится по давности: **сначала недавно добавленные**, затем более старые записи. Старые `favorites.json` без поля `price` загружаются без миграции.
 
@@ -355,7 +355,7 @@ npm run generate-ai -- --count 20 --min-length 5 --max-length 8 --temperature 0.
 
 `--temperature` принимает значения 0–3: низкие дают более предсказуемые варианты, высокие — больше разнообразия. Нейрогенератор сохраняет Telegram-совместимый минимум 5; четырёхсимвольный режим относится к обычному `search --source fragment`.
 
-`--estimate-price` работает и без `--source`: в таком режиме модель оценивает потенциальную цену всех сгенерированных имён без утверждения об их доступности. Если задан `--out`, оценки `ton` / `usd` / `rub` сохраняются в JSON вместе с кандидатами или результатами проверки и отображаются в Handle Radar.
+`--estimate-price` работает и без `--source`: в таком режиме модель оценивает потенциальную цену всех сгенерированных имён без утверждения об их доступности. Если задан `--out`, оценки `ton` / `usd` / `rub` сохраняются в JSON вместе с кандидатами или результатами проверки и отображаются в Token.
 
 ### 4. Курсы валют
 
@@ -367,7 +367,7 @@ npm run generate-ai -- --count 20 --min-length 5 --max-length 8 --temperature 0.
 
 ```mermaid
 flowchart LR
-    UI["Handle Radar<br/>HTML · CSS · JS"] --> API["Local HTTP API<br/>127.0.0.1:4173"]
+    UI["Token<br/>HTML · CSS · JS"] --> API["Local HTTP API<br/>127.0.0.1:4173"]
     API --> Queue["Очередь задач<br/>progress · logs · SSE"]
     Queue --> Core["Общее TypeScript-ядро"]
     CLI["CLI-команды"] --> Core
@@ -386,7 +386,7 @@ flowchart LR
 ```mermaid
 sequenceDiagram
     participant U as Пользователь
-    participant W as Handle Radar
+    participant W as Token
     participant Q as Очередь
     participant T as Telegram
     participant F as Fragment
@@ -458,14 +458,14 @@ src/
   rates.ts                       — CoinGecko и дисковый кэш
 
 web/
-  index.html                     — четыре раздела Handle Radar
+  index.html                     — четыре раздела Token
   app.js                         — состояние, API, формы, результаты и login flow
   styles.css                     — адаптивная визуальная система
 
 tests/                           — node:test-регрессии generator, Fragment, MTProto,
                                    collector, rates, price training и web API
 design-system/
-  handle-radar/MASTER.md         — дизайн-токены и спецификация интерфейса
+  token/MASTER.md                — дизайн-токены и спецификация интерфейса
 ```
 
 Рабочие данные создаются в `data/`, `models/`, `debug/`, `.runtime/`, `favorites.json`, `.env` и `.tg-session`.
@@ -480,7 +480,7 @@ design-system/
 | Fragment возвращает `unknown` | Нет однозначного сигнала либо запрос ограничен | Не считать имя свободным; повторить позже и открыть карточку вручную |
 | Модель цены не обучается | В истории меньше 30 корректных продаж | Сначала выполнить `npm run collect-sales -- --pages 4`, затем повторить обучение |
 | Playwright не запускается | Chromium для optional dependency не установлен | Выполнить `npx playwright install chromium` |
-| Порт `4173` занят | Уже запущен экземпляр Handle Radar или другой процесс | Закрыть старый процесс либо задать другой `WEB_PORT` перед запуском |
+| Порт `4173` занят | Уже запущен экземпляр Token или другой процесс | Закрыть старый процесс либо задать другой `WEB_PORT` перед запуском |
 
 Если проблема воспроизводится, передавайте текст ошибки, использованную команду и обезличенный debug-файл. Никогда не прикладывайте `.env` или `.tg-session`.
 
@@ -489,6 +489,5 @@ design-system/
 - **v2** — официальная Telegram-проверка через MTProto, `invalid` отдельно от `unknown`, `--source both` по умолчанию.
 - **v3** — readable-генератор переведён со словаря на слоги, вывод объединён в одну строку на кандидата.
 - **v4** — добавлен `--mode word` с управляемой позицией обязательного слова.
-- **v5** — рабочий Fragment collector, локальные модели цены/генерации, best-validation checkpoint, четырёхсимвольные Fragment-кандидаты, регрессионные тесты и локальный веб-интерфейс Handle Radar.
+- **v5** — рабочий Fragment collector, локальные модели цены/генерации, best-validation checkpoint, четырёхсимвольные Fragment-кандидаты, регрессионные тесты и локальный веб-интерфейс Token.
 - **v6** — режимы генерации `dictionary` и `compound`, нацеленные напрямую на факторы цены (`isDictionaryWord`/`hasPopularToken`); новый признак `isTwoWordCompound` в модели цены; обучение нейросетевого генератора теперь взвешивает продажи по цене (нижний квартиль отбрасывается как рыночный шум) и подмешивает выборку словаря как образец фонотактики.
-

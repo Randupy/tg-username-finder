@@ -217,7 +217,7 @@ export class TelegramLoginFlow {
             const detail = sanitizeTelegramError(error);
             if (/SIGNUP_NOT_SUPPORTED/i.test(detail)) {
               this.terminalError =
-                "Этот номер не привязан к аккаунту. Создание новых аккаунтов из Handle Radar отключено.";
+                "Этот номер не привязан к аккаунту. Создание новых аккаунтов из Token отключено.";
               this.update("error", this.terminalError, startedAt);
               return Promise.resolve(true);
             }

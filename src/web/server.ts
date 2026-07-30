@@ -33,6 +33,7 @@ const MIME_TYPES: Record<string, string> = {
   ".jpg": "image/jpeg",
   ".jpeg": "image/jpeg",
   ".webp": "image/webp",
+  ".svg": "image/svg+xml",
   ".ico": "image/x-icon",
   ".woff2": "font/woff2",
 };
@@ -457,11 +458,11 @@ export async function startWebServer(options: ServerOptions = {}): Promise<Serve
   });
   const address = app.server.address();
   const actualPort = typeof address === "object" && address ? address.port : app.port;
-  console.log(`Handle Radar: http://${app.host}:${actualPort}`);
+  console.log(`Token: http://${app.host}:${actualPort}`);
 
   const handleSignal = () => {
     void app.shutdown().catch((error) => {
-      console.error(`Не удалось корректно остановить Handle Radar: ${error instanceof Error ? error.message : error}`);
+      console.error(`Не удалось корректно остановить Token: ${error instanceof Error ? error.message : error}`);
       process.exitCode = 1;
     });
   };

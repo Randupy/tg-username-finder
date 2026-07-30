@@ -22,7 +22,7 @@ export function telegramStartupAdvice(error: unknown): string[] {
   if (ACCESS_DENIED_CODES.has(code)) {
     return [
       "Это не ошибка API ID, API Hash или Telegram-сессии: процессу Node.js запрещено открыть сетевое соединение с Telegram.",
-      "Если Handle Radar запущен из Codex/IDE-песочницы, остановите этот сервер и запустите `npm run web` в обычном PowerShell. При запросе Windows разрешите node.exe доступ к частной сети.",
+      "Если Token запущен из Codex/IDE-песочницы, остановите этот сервер и запустите `npm run web` в обычном PowerShell. При запросе Windows разрешите node.exe доступ к частной сети.",
     ];
   }
   if (NETWORK_CODES.has(code)) {
@@ -32,7 +32,7 @@ export function telegramStartupAdvice(error: unknown): string[] {
     ];
   }
   return [
-    "Проверьте Telegram-сессию: откройте раздел «Настройка» в Handle Radar или выполните `npm run login`.",
+    "Проверьте Telegram-сессию: откройте раздел «Настройка» в Token или выполните `npm run login`.",
     "Временный `--legacy-web` не требует MTProto-входа, но использует менее надёжную HTML-эвристику.",
   ];
 }

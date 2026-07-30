@@ -217,6 +217,11 @@ test("local server protects mutations and persists favorites inside an isolated 
       "junction",
     );
     mkdirSync(resolve(isolatedRoot, "data"), { recursive: true });
+    mkdirSync(resolve(isolatedRoot, "web", "assets"), { recursive: true });
+    copyFileSync(
+      resolve(PROJECT_ROOT, "web", "assets", "token-mark.svg"),
+      resolve(isolatedRoot, "web", "assets", "token-mark.svg"),
+    );
     writeFileSync(
       resolve(isolatedRoot, "data", "sold-history.json"),
       JSON.stringify([
@@ -280,6 +285,11 @@ test("local server protects mutations and persists favorites inside an isolated 
     assert.equal(health.status, 200);
     assert.deepEqual(health.body, { ok: true });
     assert.equal(health.headers["x-frame-options"], "DENY");
+
+    const logo = await httpJson(port, "/assets/token-mark.svg");
+    assert.equal(logo.status, 200);
+    assert.equal(logo.headers["content-type"], "image/svg+xml");
+    assert.match(String(logo.body), /<svg\b/);
 
     const status = await httpJson(port, "/api/status");
     assert.equal(status.status, 200);
