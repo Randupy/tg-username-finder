@@ -31,6 +31,406 @@ const state = {
 const $ = (selector, root = document) => root.querySelector(selector);
 const $$ = (selector, root = document) => Array.from(root.querySelectorAll(selector));
 
+const customSelects = new WeakMap();
+const customSelectForms = new WeakSet();
+let openCustomSelect = null;
+let customSelectId = 0;
+let customSelectOutsideClickBound = false;
+
+function customSelectOptionDisabled(option) {
+  return option.disabled || (option.parentElement?.tagName === "OPTGROUP" && option.parentElement.disabled);
+}
+
+function customSelectOptionLabel(option) {
+  return String(option.label || option.textContent || "").trim();
+}
+
+function nextCustomSelectId(select) {
+  const base = select.id ? `${select.id}-trigger` : `custom-select-trigger-${++customSelectId}`;
+  let candidate = base;
+  while (document.getElementById(candidate)) {
+    customSelectId += 1;
+    candidate = `${base}-${customSelectId}`;
+  }
+  return candidate;
+}
+
+function setCustomSelectActive(custom, index, { scroll = true } = {}) {
+  const nextIndex =
+    Number.isInteger(index) &&
+    index >= 0 &&
+    index < custom.select.options.length &&
+    !customSelectOptionDisabled(custom.select.options[index])
+      ? index
+      : -1;
+
+  custom.activeIndex = nextIndex;
+  const selectedIndex = custom.isOpen ? nextIndex : custom.select.selectedIndex;
+  custom.optionNodes.forEach((optionNode, optionIndex) => {
+    optionNode.classList.toggle("is-active", optionIndex === nextIndex);
+    optionNode.classList.toggle("is-selected", optionIndex === selectedIndex);
+    optionNode.setAttribute("aria-selected", String(optionIndex === selectedIndex));
+  });
+
+  const activeOption = nextIndex >= 0 ? custom.optionNodes[nextIndex] : null;
+  if (activeOption) {
+    custom.trigger.setAttribute("aria-activedescendant", activeOption.id);
+    if (scroll && custom.isOpen) {
+      activeOption.scrollIntoView({ block: "nearest" });
+    }
+  } else {
+    custom.trigger.removeAttribute("aria-activedescendant");
+  }
+}
+
+function closeCustomSelect(custom, { focus = false } = {}) {
+  if (!custom) return;
+  custom.isOpen = false;
+  custom.wrapper.classList.remove("is-open");
+  custom.trigger.setAttribute("aria-expanded", "false");
+  custom.list.hidden = true;
+  setCustomSelectActive(custom, -1, { scroll: false });
+  if (openCustomSelect === custom) openCustomSelect = null;
+  if (focus && !custom.trigger.disabled) custom.trigger.focus();
+}
+
+function firstEnabledCustomSelectOption(select, fromEnd = false) {
+  const start = fromEnd ? select.options.length - 1 : 0;
+  const end = fromEnd ? -1 : select.options.length;
+  const step = fromEnd ? -1 : 1;
+  for (let index = start; index !== end; index += step) {
+    if (!customSelectOptionDisabled(select.options[index])) return index;
+  }
+  return -1;
+}
+
+function adjacentEnabledCustomSelectOption(select, index, direction) {
+  let candidate =
+    index < 0
+      ? direction > 0
+        ? 0
+        : select.options.length - 1
+      : index + direction;
+  while (candidate >= 0 && candidate < select.options.length) {
+    if (!customSelectOptionDisabled(select.options[candidate])) return candidate;
+    candidate += direction;
+  }
+  return index;
+}
+
+function openCustomSelectList(custom) {
+  if (custom.select.disabled) return;
+  if (openCustomSelect && openCustomSelect !== custom) closeCustomSelect(openCustomSelect);
+
+  syncCustomSelect(custom.select);
+  custom.isOpen = true;
+  openCustomSelect = custom;
+  custom.wrapper.classList.add("is-open");
+  custom.trigger.setAttribute("aria-expanded", "true");
+  custom.list.hidden = false;
+  custom.wrapper.classList.remove("is-above");
+  const triggerRect = custom.trigger.getBoundingClientRect();
+  const roomBelow = window.innerHeight - triggerRect.bottom;
+  const roomAbove = triggerRect.top;
+  const listHeight = Math.min(custom.list.scrollHeight, 288);
+  custom.wrapper.classList.toggle(
+    "is-above",
+    roomBelow < listHeight + 12 && roomAbove > roomBelow,
+  );
+
+  const selectedIndex = custom.select.selectedIndex;
+  const activeIndex =
+    selectedIndex >= 0 && !customSelectOptionDisabled(custom.select.options[selectedIndex])
+      ? selectedIndex
+      : firstEnabledCustomSelectOption(custom.select);
+  setCustomSelectActive(custom, activeIndex);
+}
+
+function chooseCustomSelectOption(custom, index, { focus = true } = {}) {
+  const option = custom.select.options[index];
+  if (!option || custom.select.disabled || customSelectOptionDisabled(option)) return;
+
+  custom.select.value = option.value;
+  if (custom.select.selectedIndex !== index) custom.select.selectedIndex = index;
+  syncCustomSelect(custom.select);
+  closeCustomSelect(custom, { focus });
+  custom.select.dispatchEvent(new Event("input", { bubbles: true }));
+  custom.select.dispatchEvent(new Event("change", { bubbles: true }));
+}
+
+function normalizedCustomSelectText(value) {
+  return String(value)
+    .normalize("NFKD")
+    .toLocaleLowerCase("ru-RU");
+}
+
+function typeaheadCustomSelect(custom, key) {
+  const now = Date.now();
+  const normalizedKey = normalizedCustomSelectText(key);
+  custom.typeahead =
+    now - custom.typeaheadAt > 700 ? normalizedKey : `${custom.typeahead}${normalizedKey}`;
+  custom.typeaheadAt = now;
+
+  const findMatch = (query) => {
+    if (!query) return -1;
+    const repeated = query.length > 1 && Array.from(query).every((character) => character === query[0]);
+    const needle = repeated ? query[0] : query;
+    const currentIndex =
+      custom.activeIndex >= 0 ? custom.activeIndex : custom.select.selectedIndex;
+    const startIndex = repeated || query.length === 1 ? currentIndex + 1 : Math.max(currentIndex, 0);
+
+    for (let offset = 0; offset < custom.select.options.length; offset += 1) {
+      const index = (startIndex + offset) % custom.select.options.length;
+      const option = custom.select.options[index];
+      if (
+        !customSelectOptionDisabled(option) &&
+        normalizedCustomSelectText(customSelectOptionLabel(option)).startsWith(needle)
+      ) {
+        return index;
+      }
+    }
+    return -1;
+  };
+
+  let matchIndex = findMatch(custom.typeahead);
+  if (matchIndex < 0 && custom.typeahead.length > normalizedKey.length) {
+    custom.typeahead = normalizedKey;
+    matchIndex = findMatch(custom.typeahead);
+  }
+  if (matchIndex < 0) return;
+
+  if (custom.isOpen) setCustomSelectActive(custom, matchIndex);
+  else chooseCustomSelectOption(custom, matchIndex);
+}
+
+function handleCustomSelectKeydown(custom, event) {
+  const { key } = event;
+
+  if (key === "Tab") {
+    if (custom.isOpen && custom.activeIndex >= 0) {
+      chooseCustomSelectOption(custom, custom.activeIndex, { focus: false });
+    } else if (custom.isOpen) {
+      closeCustomSelect(custom);
+    }
+    return;
+  }
+
+  if (key === "Escape") {
+    if (custom.isOpen) {
+      event.preventDefault();
+      closeCustomSelect(custom, { focus: true });
+    }
+    return;
+  }
+
+  if (key === "Enter" || key === " " || key === "Spacebar") {
+    event.preventDefault();
+    if (!custom.isOpen) {
+      openCustomSelectList(custom);
+    } else if (custom.activeIndex >= 0) {
+      chooseCustomSelectOption(custom, custom.activeIndex);
+    }
+    return;
+  }
+
+  if (key === "ArrowDown" || key === "ArrowUp") {
+    event.preventDefault();
+    if (!custom.isOpen) {
+      openCustomSelectList(custom);
+      return;
+    }
+    const direction = key === "ArrowDown" ? 1 : -1;
+    const nextIndex = adjacentEnabledCustomSelectOption(
+      custom.select,
+      custom.activeIndex,
+      direction,
+    );
+    setCustomSelectActive(custom, nextIndex);
+    return;
+  }
+
+  if (key === "Home" || key === "End") {
+    event.preventDefault();
+    if (!custom.isOpen) openCustomSelectList(custom);
+    setCustomSelectActive(
+      custom,
+      firstEnabledCustomSelectOption(custom.select, key === "End"),
+    );
+    return;
+  }
+
+  if (
+    key.length === 1 &&
+    !event.altKey &&
+    !event.ctrlKey &&
+    !event.metaKey
+  ) {
+    event.preventDefault();
+    typeaheadCustomSelect(custom, key);
+  }
+}
+
+function syncCustomSelect(select) {
+  const custom = customSelects.get(select);
+  if (!custom) return;
+
+  select.classList.add("custom-select__native");
+  select.setAttribute("aria-hidden", "true");
+  select.tabIndex = -1;
+  select.hidden = true;
+
+  const selectedOption = select.selectedIndex >= 0 ? select.options[select.selectedIndex] : null;
+  custom.value.textContent = selectedOption ? customSelectOptionLabel(selectedOption) : "";
+  custom.trigger.disabled = select.disabled;
+  custom.trigger.setAttribute("aria-disabled", String(select.disabled));
+  custom.wrapper.classList.toggle("is-disabled", select.disabled);
+
+  for (const attribute of [
+    "aria-describedby",
+    "aria-invalid",
+    "aria-label",
+    "aria-labelledby",
+  ]) {
+    const value = select.getAttribute(attribute);
+    if (value) custom.trigger.setAttribute(attribute, value);
+    else custom.trigger.removeAttribute(attribute);
+  }
+  if (select.required) custom.trigger.setAttribute("aria-required", "true");
+  else custom.trigger.removeAttribute("aria-required");
+
+  const fragment = document.createDocumentFragment();
+  custom.optionNodes = Array.from(select.options, (option, index) => {
+    const optionNode = document.createElement("div");
+    optionNode.className = "custom-select__option";
+    optionNode.id = `${custom.list.id}-option-${index}`;
+    optionNode.dataset.index = String(index);
+    optionNode.setAttribute("role", "option");
+    optionNode.setAttribute("aria-selected", String(index === select.selectedIndex));
+    optionNode.textContent = customSelectOptionLabel(option);
+
+    const disabled = customSelectOptionDisabled(option);
+    optionNode.classList.toggle("is-selected", index === select.selectedIndex);
+    optionNode.classList.toggle("is-disabled", disabled);
+    optionNode.hidden = option.hidden;
+    if (disabled) optionNode.setAttribute("aria-disabled", "true");
+    fragment.append(optionNode);
+    return optionNode;
+  });
+  custom.list.replaceChildren(fragment);
+
+  if (select.disabled && custom.isOpen) {
+    closeCustomSelect(custom);
+  } else if (custom.isOpen) {
+    const selectedIndex =
+      select.selectedIndex >= 0 &&
+      !customSelectOptionDisabled(select.options[select.selectedIndex])
+        ? select.selectedIndex
+        : firstEnabledCustomSelectOption(select);
+    setCustomSelectActive(custom, selectedIndex, { scroll: false });
+  } else {
+    setCustomSelectActive(custom, -1, { scroll: false });
+  }
+}
+
+function enhanceCustomSelect(select) {
+  if (customSelects.has(select)) return customSelects.get(select);
+
+  const wrapper = document.createElement("div");
+  wrapper.className = "custom-select";
+
+  const trigger = document.createElement("button");
+  const triggerId = nextCustomSelectId(select);
+  trigger.type = "button";
+  trigger.className = "custom-select__trigger";
+  trigger.id = triggerId;
+  trigger.setAttribute("role", "combobox");
+  trigger.setAttribute("aria-expanded", "false");
+  trigger.setAttribute("aria-haspopup", "listbox");
+  trigger.setAttribute("aria-autocomplete", "none");
+
+  const value = document.createElement("span");
+  value.className = "custom-select__value";
+  trigger.append(value);
+
+  const list = document.createElement("div");
+  list.className = "custom-select__list";
+  list.id = `${triggerId}-listbox`;
+  list.setAttribute("role", "listbox");
+  list.setAttribute("aria-labelledby", triggerId);
+  list.hidden = true;
+  trigger.setAttribute("aria-controls", list.id);
+
+  wrapper.append(trigger, list);
+  select.insertAdjacentElement("afterend", wrapper);
+
+  if (select.id) {
+    $$("label[for]").forEach((label) => {
+      if (label.htmlFor === select.id) label.htmlFor = triggerId;
+    });
+  }
+
+  const custom = {
+    select,
+    wrapper,
+    trigger,
+    value,
+    list,
+    optionNodes: [],
+    activeIndex: -1,
+    isOpen: false,
+    typeahead: "",
+    typeaheadAt: 0,
+  };
+  customSelects.set(select, custom);
+
+  trigger.addEventListener("click", () => {
+    if (custom.isOpen) closeCustomSelect(custom);
+    else openCustomSelectList(custom);
+  });
+  trigger.addEventListener("keydown", (event) => {
+    handleCustomSelectKeydown(custom, event);
+  });
+  list.addEventListener("pointerover", (event) => {
+    const optionNode = event.target.closest?.(".custom-select__option");
+    if (!optionNode || !list.contains(optionNode)) return;
+    const optionIndex = Number(optionNode.dataset.index);
+    if (customSelectOptionDisabled(custom.select.options[optionIndex])) return;
+    setCustomSelectActive(custom, optionIndex, { scroll: false });
+  });
+  list.addEventListener("click", (event) => {
+    const optionNode = event.target.closest?.(".custom-select__option");
+    if (!optionNode || !list.contains(optionNode)) return;
+    chooseCustomSelectOption(custom, Number(optionNode.dataset.index));
+  });
+  select.addEventListener("input", () => syncCustomSelect(select));
+  select.addEventListener("change", () => syncCustomSelect(select));
+
+  if (select.form && !customSelectForms.has(select.form)) {
+    customSelectForms.add(select.form);
+    select.form.addEventListener("reset", () => {
+      window.setTimeout(() => {
+        Array.from(select.form.elements).forEach((field) => {
+          if (field instanceof HTMLSelectElement) syncCustomSelect(field);
+        });
+      }, 0);
+    });
+  }
+
+  syncCustomSelect(select);
+  return custom;
+}
+
+function initializeCustomSelects() {
+  $$("select").forEach(enhanceCustomSelect);
+  if (customSelectOutsideClickBound) return;
+  customSelectOutsideClickBound = true;
+  document.addEventListener("pointerdown", (event) => {
+    if (openCustomSelect && !openCustomSelect.wrapper.contains(event.target)) {
+      closeCustomSelect(openCustomSelect);
+    }
+  });
+}
+
 function isObject(value) {
   return Boolean(value) && typeof value === "object" && !Array.isArray(value);
 }
@@ -198,6 +598,10 @@ function routeFromHash() {
 }
 
 function renderRoute({ focus = false } = {}) {
+  if (openCustomSelect) {
+    closeCustomSelect(openCustomSelect);
+  }
+
   const route = routeFromHash();
   state.route = route;
   $$("[data-route-view]").forEach((view) => {
@@ -220,16 +624,6 @@ function renderRoute({ focus = false } = {}) {
 function dotClass(tone) {
   const known = ["success", "warning", "danger", "active", "neutral"];
   return `status-dot status-dot--${known.includes(tone) ? tone : "neutral"}`;
-}
-
-function setStatusChip(id, label, value, tone = "neutral") {
-  const chip = $(`#${id}`);
-  if (!chip) return;
-  chip.classList.remove("status-chip--loading");
-  const dot = $(".status-dot", chip);
-  dot.className = dotClass(tone);
-  $("small", chip).textContent = label;
-  $("strong", chip).textContent = value;
 }
 
 function modelExists(model) {
@@ -266,34 +660,7 @@ function normalizeStatus(payload) {
 }
 
 function renderStatus() {
-  const status = state.status;
-  if (!status) return;
-  const telegram = status.telegram;
-  const soldCount = status.data.soldCount;
-  const priceReady = modelExists(status.models.price);
-  const generatorReady = modelExists(status.models.generator);
-
-  setStatusChip("status-api", "API", "На связи", "success");
-  if (telegram.sessionExists) {
-    setStatusChip("status-telegram", "Telegram", "Сессия найдена", "success");
-  } else if (telegram.credentialsConfigured) {
-    setStatusChip("status-telegram", "Telegram", "Нужен вход", "warning");
-  } else {
-    setStatusChip("status-telegram", "Telegram", "Нужна настройка", "danger");
-  }
-  setStatusChip(
-    "status-data",
-    "Датасет",
-    `${formatNumber(soldCount)} продаж`,
-    soldCount >= 30 ? "success" : soldCount > 0 ? "warning" : "neutral",
-  );
-  const readyModels = Number(priceReady) + Number(generatorReady);
-  setStatusChip(
-    "status-models",
-    "Модели",
-    `${readyModels} из 2 готовы`,
-    readyModels === 2 ? "success" : readyModels > 0 ? "warning" : "neutral",
-  );
+  if (!state.status) return;
 
   $("#sidebar-api-label").textContent = "API онлайн";
   $("#sidebar-api-dot").className = dotClass("success");
@@ -306,7 +673,6 @@ function renderStatus() {
 }
 
 function renderOffline(error) {
-  setStatusChip("status-api", "API", "Нет связи", "danger");
   $("#sidebar-api-label").textContent = "API офлайн";
   $("#sidebar-api-dot").className = dotClass("danger");
   $("#mobile-api-state").innerHTML =
@@ -931,6 +1297,7 @@ function renderResults(result, job = null) {
   if (resultsSortSelect && resultsSortSelect.value !== state.resultSort) {
     resultsSortSelect.value = state.resultSort;
   }
+  if (resultsSortSelect) syncCustomSelect(resultsSortSelect);
   if (!rows.length) {
     const fallback =
       job?.status === "succeeded"
@@ -1091,6 +1458,7 @@ function renderFavorites() {
   $("#favorites-total").textContent = `${formatNumber(sorted.length)} сохранено`;
   const sortSelect = $("#favorites-sort");
   if (sortSelect && sortSelect.value !== state.favoriteSort) sortSelect.value = state.favoriteSort;
+  if (sortSelect) syncCustomSelect(sortSelect);
 
   if (!sorted.length) {
     mount.innerHTML = `
@@ -1378,6 +1746,7 @@ function bindSearchForm() {
     $("#search-word").required = isWord;
     digitsRequire.disabled = isTranslit;
     if (isTranslit && digits.value === "require") digits.value = "exclude";
+    syncCustomSelect(digits);
     $("#search-digits-hint").textContent = isTranslit
       ? "Точный транслит одного существительного — без цифр и суффиксов."
       : "Политика цифр для сгенерированных имён.";
@@ -1760,6 +2129,7 @@ function bindResultsSort() {
 
 async function initialize() {
   renderRoute();
+  initializeCustomSelects();
   bindGlobalActions();
   bindSearchForm();
   bindModelForms();

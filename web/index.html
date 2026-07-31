@@ -20,10 +20,21 @@
     <div class="app-shell">
       <header class="sidebar">
         <a class="brand" href="#search" aria-label="Token — перейти к поиску">
-          <picture class="brand-logo" aria-hidden="true">
-            <source media="(max-width: 420px)" srcset="/assets/token-mark.svg">
-            <img src="/assets/token-logo.svg" alt="" width="152" height="40">
-          </picture>
+          <span class="brand-logo" aria-hidden="true">
+            <svg class="brand-mark" viewBox="0 0 48 48" focusable="false">
+              <path
+                class="brand-mark__base"
+                d="M41 23V9H7V23H21C26 23 29 26 29 31C29 36 26 39 21 39H18V42H30"
+              />
+              <path
+                class="brand-mark__trace"
+                pathLength="100"
+                d="M41 23V9H7V23H21C26 23 29 26 29 31C29 36 26 39 21 39H18V42H30"
+              />
+              <rect class="brand-mark__cursor" x="34" y="38" width="7" height="7" rx="1.5" />
+            </svg>
+            <span class="brand-wordmark">Token</span>
+          </span>
         </a>
 
         <nav class="side-nav" aria-label="Основные разделы">
@@ -55,10 +66,21 @@
 
       <header class="mobile-header">
         <a class="brand brand--compact" href="#search" aria-label="Token — перейти к поиску">
-          <picture class="brand-logo" aria-hidden="true">
-            <source media="(max-width: 420px)" srcset="/assets/token-mark.svg">
-            <img src="/assets/token-logo.svg" alt="" width="152" height="40">
-          </picture>
+          <span class="brand-logo" aria-hidden="true">
+            <svg class="brand-mark" viewBox="0 0 48 48" focusable="false">
+              <path
+                class="brand-mark__base"
+                d="M41 23V9H7V23H21C26 23 29 26 29 31C29 36 26 39 21 39H18V42H30"
+              />
+              <path
+                class="brand-mark__trace"
+                pathLength="100"
+                d="M41 23V9H7V23H21C26 23 29 26 29 31C29 36 26 39 21 39H18V42H30"
+              />
+              <rect class="brand-mark__cursor" x="34" y="38" width="7" height="7" rx="1.5" />
+            </svg>
+            <span class="brand-wordmark">Token</span>
+          </span>
         </a>
         <span class="mobile-api-state" id="mobile-api-state">
           <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
@@ -69,7 +91,6 @@
       <main id="main-content" class="main-content" tabindex="-1">
         <header class="topbar">
           <div>
-            <p class="eyebrow">Token · локальная рабочая среда</p>
             <h1 id="page-title">Поиск юзернеймов</h1>
           </div>
           <div class="topbar-meta">
@@ -77,50 +98,17 @@
           </div>
         </header>
 
-        <section class="status-strip" aria-label="Состояние системы">
-          <div class="status-chip status-chip--loading" id="status-api">
-            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
-            <span>
-              <small>API</small>
-              <strong>Проверяем</strong>
-            </span>
-          </div>
-          <div class="status-chip status-chip--loading" id="status-telegram">
-            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
-            <span>
-              <small>Telegram</small>
-              <strong>Проверяем</strong>
-            </span>
-          </div>
-          <div class="status-chip status-chip--loading" id="status-data">
-            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
-            <span>
-              <small>Датасет</small>
-              <strong>Загрузка</strong>
-            </span>
-          </div>
-          <div class="status-chip status-chip--loading" id="status-models">
-            <span class="status-dot status-dot--neutral" aria-hidden="true"></span>
-            <span>
-              <small>Модели</small>
-              <strong>Проверяем</strong>
-            </span>
-          </div>
-        </section>
-
         <section class="page-view" data-route-view="search" aria-labelledby="search-heading">
           <div class="search-layout">
             <article class="panel search-panel">
               <header class="panel-heading search-heading">
                 <div>
-                  <p class="eyebrow">Поиск и проверка</p>
                   <h2 id="search-heading">Найдите свободное имя</h2>
                   <p>
                     Создайте кандидатов и проверьте их через официальный Telegram MTProto,
                     Fragment или оба источника сразу.
                   </p>
                 </div>
-                <span class="precision-badge">Точная проверка</span>
               </header>
 
               <form id="search-form" class="form-stack" novalidate>
@@ -178,7 +166,7 @@
 
                   <div class="field">
                     <label for="search-digits">Цифры</label>
-                    <select id="search-digits" name="digits">
+                    <select id="search-digits" name="digits" aria-describedby="search-digits-hint">
                       <option value="exclude">Исключить</option>
                       <option value="allow">Разрешить</option>
                       <option value="require">Обязательны</option>
@@ -334,50 +322,28 @@
               </form>
             </article>
 
-            <aside class="panel insight-panel" aria-label="Контекст поиска">
-              <p class="eyebrow">Источники сигнала</p>
-              <h2>Проверка без догадок</h2>
-              <div class="insight-list">
-                <div>
-                  <span class="insight-index">01</span>
-                  <p><strong>Telegram</strong><small>account.checkUsername через MTProto</small></p>
-                </div>
-                <div>
-                  <span class="insight-index">02</span>
-                  <p><strong>Fragment</strong><small>Листинг и страница лота</small></p>
-                </div>
-                <div>
-                  <span class="insight-index">03</span>
-                  <p><strong>Цена</strong><small>Локальная модель на истории продаж</small></p>
-                </div>
-              </div>
-              <a class="text-link" href="#setup">Проверить настройку Telegram</a>
-            </aside>
           </div>
 
           <div id="search-job-panel" class="job-slot" aria-live="polite"></div>
 
           <section class="panel results-panel" aria-labelledby="results-heading">
-            <header class="section-heading">
-              <div>
-                <p class="eyebrow">Результаты проверки</p>
-                <h2 id="results-heading">Результаты</h2>
+            <header class="section-heading list-toolbar">
+              <h2 id="results-heading">Результаты</h2>
+              <div class="list-toolbar-actions">
+                <div class="field field--inline">
+                  <label for="results-sort">Сортировка</label>
+                  <select id="results-sort" name="resultsSort">
+                    <option value="default">По порядку генерации</option>
+                    <option value="status">Сначала свободные</option>
+                    <option value="username-asc">Юзернейм А→Я</option>
+                    <option value="username-desc">Юзернейм Я→А</option>
+                    <option value="price-desc">Цена: сначала дороже</option>
+                    <option value="price-asc">Цена: сначала дешевле</option>
+                  </select>
+                </div>
+                <span id="results-count" class="count-label">Пока нет данных</span>
               </div>
-              <span id="results-count" class="count-label">Пока нет данных</span>
             </header>
-            <div class="filter-row">
-              <div class="field field--inline">
-                <label for="results-sort">Сортировка</label>
-                <select id="results-sort" name="resultsSort">
-                  <option value="default">По порядку генерации</option>
-                  <option value="status">Сначала свободные</option>
-                  <option value="username-asc">Юзернейм А→Я</option>
-                  <option value="username-desc">Юзернейм Я→А</option>
-                  <option value="price-desc">Цена: сначала дороже</option>
-                  <option value="price-asc">Цена: сначала дешевле</option>
-                </select>
-              </div>
-            </div>
             <div id="results-content">
               <div class="empty-state">
                 <span class="empty-code" aria-hidden="true">@_</span>
@@ -391,13 +357,11 @@
         <section class="page-view" data-route-view="models" aria-labelledby="models-heading" hidden>
           <header class="page-intro">
             <div>
-              <p class="eyebrow">Данные и обучение</p>
-              <h2 id="models-heading">Данные и локальные модели</h2>
+              <h2 id="models-heading">Обучение на локальных данных</h2>
               <p>
                 Соберите реальные продажи Fragment, обучите оценку цены и генератор — всё остаётся в проекте.
               </p>
             </div>
-            <span class="precision-badge">Локальные модели</span>
           </header>
 
           <div class="metric-grid" id="model-metrics" aria-live="polite">
@@ -528,11 +492,9 @@
           <article class="panel ai-panel">
             <header class="panel-heading">
               <div>
-                <p class="eyebrow">Нейрогенерация</p>
                 <h2>Создать имена моделью</h2>
                 <p>Управляйте разнообразием через температуру и сразу отправляйте результат на проверку.</p>
               </div>
-              <span class="precision-badge precision-badge--accent">AI</span>
             </header>
             <form id="generate-ai-form" class="form-stack" novalidate>
               <div class="field-grid field-grid--ai">
@@ -633,7 +595,6 @@
           <section class="panel history-panel" aria-labelledby="history-heading">
             <header class="section-heading">
               <div>
-                <p class="eyebrow">Очередь задач</p>
                 <h2 id="history-heading">Последние задачи</h2>
               </div>
               <button class="button button--quiet button--small" id="refresh-jobs" type="button">
@@ -649,8 +610,7 @@
         <section class="page-view" data-route-view="favorites" aria-labelledby="favorites-heading" hidden>
           <header class="page-intro">
             <div>
-              <p class="eyebrow">Короткий список</p>
-              <h2 id="favorites-heading">Избранные юзернеймы</h2>
+              <h2 id="favorites-heading">Короткий список кандидатов</h2>
               <p>Соберите короткий список, добавьте контекст и вернитесь к лучшим вариантам позже.</p>
             </div>
             <div class="favorites-header-actions">
@@ -722,20 +682,23 @@
             </form>
           </article>
 
-          <section class="panel favorites-panel" aria-label="Список избранного">
-            <div class="filter-row">
-              <div class="field field--inline">
-                <label for="favorites-sort">Сортировка</label>
-                <select id="favorites-sort" name="favoritesSort">
-                  <option value="added-desc">Сначала новые</option>
-                  <option value="added-asc">Сначала старые</option>
-                  <option value="username-asc">Юзернейм А→Я</option>
-                  <option value="username-desc">Юзернейм Я→А</option>
-                  <option value="price-desc">Цена: сначала дороже</option>
-                  <option value="price-asc">Цена: сначала дешевле</option>
-                </select>
+          <section class="panel favorites-panel" aria-labelledby="favorites-list-heading">
+            <header class="section-heading list-toolbar">
+              <h2 id="favorites-list-heading">Сохранённые имена</h2>
+              <div class="list-toolbar-actions">
+                <div class="field field--inline">
+                  <label for="favorites-sort">Сортировка</label>
+                  <select id="favorites-sort" name="favoritesSort">
+                    <option value="added-desc">Сначала новые</option>
+                    <option value="added-asc">Сначала старые</option>
+                    <option value="username-asc">Юзернейм А→Я</option>
+                    <option value="username-desc">Юзернейм Я→А</option>
+                    <option value="price-desc">Цена: сначала дороже</option>
+                    <option value="price-asc">Цена: сначала дешевле</option>
+                  </select>
+                </div>
               </div>
-            </div>
+            </header>
             <div id="favorites-content" aria-live="polite">
               <div class="favorite-skeleton">
                 <span class="skeleton skeleton--line"></span>
@@ -749,8 +712,7 @@
         <section class="page-view" data-route-view="setup" aria-labelledby="setup-heading" hidden>
           <header class="page-intro">
             <div>
-              <p class="eyebrow">Подключение</p>
-              <h2 id="setup-heading">Настройка Telegram</h2>
+              <h2 id="setup-heading">Доступ и авторизация</h2>
               <p>
                 API-ключи и строка сессии сохраняются только в локальных файлах проекта и не выводятся обратно в браузер.
               </p>
@@ -911,7 +873,6 @@
           <article class="panel readiness-panel">
             <header class="section-heading">
               <div>
-                <p class="eyebrow">Готовность системы</p>
                 <h2>Готовность к точной проверке</h2>
               </div>
             </header>

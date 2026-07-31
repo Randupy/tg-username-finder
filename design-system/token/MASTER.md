@@ -19,8 +19,10 @@ tiny metadata, and a permanent desktop sidebar.
 
 - Primary lockup: `web/assets/token-logo.svg`.
 - Compact mark: `web/assets/token-mark.svg`.
-- The geometry follows the approved Token reference: outlined hexagonal token,
-  open linear glyph, and the small square signal.
+- The geometry follows the approved T Cursor reference: one continuous route
+  forms the `T`, while the detached square acts as the input cursor and signal.
+- The live header uses inline SVG so the route trace and cursor can animate
+  independently on hover and keyboard focus.
 - Use the full lockup on desktop and the compact mark below 420px.
 
 ## Tokens
