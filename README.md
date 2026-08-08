@@ -8,7 +8,7 @@
 
 [![Node.js 20+](https://img.shields.io/badge/Node.js-20%2B-5FA04E?style=flat-square&logo=nodedotjs&logoColor=white)](https://nodejs.org/)
 [![TypeScript](https://img.shields.io/badge/TypeScript-strict-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
-![Tests](https://img.shields.io/badge/tests-74%20passing-22C55E?style=flat-square)
+![Tests](https://img.shields.io/badge/tests-191%20passing-22C55E?style=flat-square)
 ![Access](https://img.shields.io/badge/access-localhost%20only-2AABEE?style=flat-square)
 ![Repository](https://img.shields.io/badge/repository-private-111827?style=flat-square&logo=github)
 
@@ -40,7 +40,7 @@
 - [Веб-интерфейс](#локальный-веб-интерфейс)
 - [Авторизация Telegram](#настройка-telegram)
 - [Поиск через CLI](#поиск-через-cli)
-- [Collector и ML-модели](#данные-и-модели-v5)
+- [Collector и ML-модели](#данные-и-модели-v6)
 - [Архитектура](#архитектура)
 - [Тесты и сборка](#проверка-проекта)
 - [Безопасность](#локальность-и-безопасность)
@@ -280,7 +280,7 @@ npm run favorites -- remove coolvibe --source telegram
 
 Избранное всегда выводится по давности: **сначала недавно добавленные**, затем более старые записи. Старые `favorites.json` без поля `price` загружаются без миграции.
 
-## Данные и модели v5
+## Данные и модели v6
 
 ### 1. Collector продаж Fragment
 
@@ -294,7 +294,10 @@ Collector работает с текущей таблицей завершённ
 - извлекает username и фактическую `Sale price` в TON из строк таблицы;
 - не путает `minimum bid` активного аукциона с ценой продажи;
 - использует embedded JSON и ограниченный текстовый разбор только как фолбэки для подтверждённого sold-листинга;
-- удаляет дубликаты в рамках запуска и при объединении сохраняет более свежую запись по username.
+- извлекает точный `<time datetime>` сделки, когда Fragment его публикует, и никогда не подменяет его временем сбора;
+- сохраняет parser/source/view/confidence/provenance и стабильный `eventId`;
+- помещает неоднозначные строки в quarantine, повторяет временные HTTP-ошибки с bounded backoff;
+- объединяет события по `eventId`: повторная продажа того же username не затирает предыдущую.
 
 Fragment игнорирует обычный `page=` и часто возвращает один и тот же большой набор строк. Поэтому `--pages` на URL по умолчанию перебирает разные market views через `sort`:
 
@@ -312,26 +315,44 @@ npm run collect-sales -- --pages 2 --base-url "https://fragment.com/?filter=sold
 
 `--debug` сохраняет ответы как `debug/sold-page1.html` и т.д. Это диагностический режим на случай будущего изменения разметки Fragment, а не обязательное условие работы collector.
 
+Параллельно collector обновляет строгий immutable warehouse `data/market-events.json`. Существующую историю можно перенести без сетевых запросов:
+
+```bash
+npm run migrate-market-events
+```
+
+Для бесплатного raw blockchain-ingestion доступен TON Center v3. Клиент валидирует envelope/actions, поддерживает pagination, timeout, `Retry-After`, quarantine и не объявляет `auction_bid` или TON transfer продажей без отдельной сверки:
+
+```bash
+npm run collect-ton-actions -- --account <TON_ADDRESS> --pages 10 --out data/toncenter-actions.json
+```
+
+Без ключа выдерживается пауза 1000 мс. Бесплатный API key можно передать только через `TONCENTER_API_KEY`, чтобы не помещать секрет в аргументы процесса. Сбор ограничен 1000 страницами и 250 000 строками; один ответ читается потоково с лимитом 16 MiB, а чрезмерно глубокий/большой JSON отклоняется. `/nft/sales` TON Center разрешает известные адреса sale-контрактов, но не является глобальной лентой исторических продаж, поэтому raw actions сами по себе не объявляются подтверждёнными username-sale.
+
 ### 2. Модель оценки цены
 
 ```bash
-npm run train-price -- --epochs 200
+npm run train-price -- --epochs 100 --ensemble 3 --early-stopping 15 --stacker-fraction 0.1
+npm run backtest-price -- --runs 5 --out data/price-backtest.json
 ```
 
-Нужно минимум 30 продаж, но для осмысленной оценки желательно заметно больше. Небольшой MLP обучается предсказывать нормализованный `log(price + 1)` по признакам username: длине, цифрам, повторениям, чередованию гласных/согласных, популярным токенам, словарным словам (включая `isTwoWordCompound` — отдельный, более строгий признак: всё имя целиком раскладывается на два словарных слова без остатка, в отличие от `containsDictionaryWord`, который срабатывает на любую подстроку) и другим характеристикам.
+Нужно минимум 30 продаж, но практически полезная точность требует тысяч событий. Модель использует 129 детерминированных признаков: структуру цифр/подчёркиваний, повторы и последовательности, keyboard patterns, entropy/pronounceability, словарную сегментацию, commercial tokens и две независимые hash-banks символьных n-грамм.
 
-⚠️ Добавление `isTwoWordCompound` изменило длину вектора признаков — уже обученный `models/price-mlp.json` после обновления кода нужно **переобучить** (`npm run train-price`), иначе предсказания будут считаться по рассинхронизированному набору признаков.
+Итоговый регрессор — stacked ensemble из трёх MLP, robust ridge, градиентного бустинга деревьев и трёх high-value classifiers (`>100`, `>1k`, `>10k TON`). Качество parser evidence участвует в sample weights. Early stopping возвращает лучший validation checkpoint.
 
-Перед split данные детерминированно перемешиваются. Средние и стандартные отклонения признаков и цели вычисляются **только по train-части**, поэтому validation не протекает в нормализацию. После каждой эпохи считается validation MSE, а в `models/price-mlp.json` сохраняется лучший validation-checkpoint, а не просто последняя эпоха.
+Split состоит из независимых train / base-validation / stacker / calibration / test-когорт. Base-validation используется только для early stopping базовых моделей, отдельная stacker-когорта — для meta-регрессора. Calibration дополнительно делится по лексическим семействам на три непересекающиеся части: выбор retrieval-веса, калибровку residual-интервалов и калибровку вероятности ошибки не больше ×2. Финальный test остаётся нетронутым до расчёта метрик и release gate. Одно лексическое семейство не попадает в разные когорты.
 
-В файл модели также записываются метрики:
+Настоящий temporal split включается при полном покрытии точными `saleAt` либо при не менее чем 100 exact-событиях и 80% покрытия. Семейства упорядочиваются по первому exact-событию, а пересекающие временные границы resales исключаются; все временные когорты строго следуют одна за другой. Время scraping не выдаётся за время сделки. При нехватке точных времён применяется диагностический `group-random`, а если групп недостаточно — обычный `random`; оба варианта не могут получить статус approved. Нормализация вычисляется только на train.
 
-- `bestEpoch`;
-- `trainMse` и `validationMse`;
-- `trainingSize` и `validationSize`;
-- время обучения и общий размер исходного датасета.
+Prediction возвращает P10/P50/P90, явный price OOD, степень расхождения моделей, effective sample size и top comparables. Обучение и runtime используют один versioned/hash-pinned pipeline аналогов, чтобы фильтры и веса не расходились. При достаточной независимой confidence-когорте `confidenceScore` — эмпирическая вероятность ошибки не больше ×2; иначе поле честно помечено как `heuristic-score`. Residual intervals и retrieval-вес оцениваются на своих независимых когортах. Artifact получает статус approved только после strict temporal test, калибровки confidence и сравнения с global/structural median и time-safe comparables. `group-random`/`random` остаются диагностическими candidate artifacts: обычную оценку можно посмотреть с предупреждением, но `--min-price-ton` их не использует.
 
-Формат обратно совместим: ранее созданные файлы модели без блока `metrics` по-прежнему загружаются предиктором.
+`backtest-price` повторяет полный fit на нескольких детерминированных seed, агрегирует mean/std для RMSLE, within×2, Spearman, top-tail recall и interval coverage и ничего не перезаписывает. Перед историческим inference требуется отдельный cutoff/walk-forward artifact: `valuationAt <= trainedThrough` отклоняется, поскольку фильтрация одних аналогов не устраняет future leakage базовой ML-модели.
+
+Artifact привязан к текущей истории продаж через `dataHash`. После изменения `data/sold-history.json` статус показывает `dataCurrent=false`/stale, а inference и accuracy-sensitive фильтр блокируются до повторного `train-price`. Gate reason, фактический split, stale и OOD сохраняются вместе с оценкой в избранном и экспортируются в XLSX.
+
+Если warehouse содержит точные lifecycle-события `listed → sale/cancelled/expired`, дополнительно оцениваются вероятность продажи за 30/90/365 дней и median days-to-sale. Активные листинги right-censored только до последнего подтверждённого наблюдения, отмены/истечения — competing risks; одиночное старое событие листинга не создаёт месяцы фиктивного follow-up. При недостатке данных результат явно помечается OOD, а вероятность не выдумывается.
+
+`--min-price-ton` сразу запускает для каждого кандидата полный production prediction: ensemble, калибровку, аналоги и ликвидность. Фильтр сравнивает порог с итоговым P90, после отказов запрашивает новые пачки и сортирует прошедших по итоговому P50. Предварительного model-only screen нет, поэтому сильный сигнал аналогов не может «вернуть» уже ошибочно отброшенное имя. Чтобы строгий порог не создал бесконечный цикл, обычный поиск ограничен 8 пачками и `min(count × 30, 3000)` полными оценками, AI-генератор — 30 пачками и `min(count × 100, 6000)`.
 
 ### 3. Нейросетевой генератор
 
@@ -440,16 +461,25 @@ src/
   priceData/
     soldHistory.ts               — рабочий collector и parser sold-листинга Fragment
     store.ts                     — data/sold-history.json
+    marketEvents.ts              — строгий immutable market-event warehouse
+    tonCenter.ts                 — бесплатный raw TON Center v3 ingestion
   priceModel/
-    features.ts                  — признаки username
-    train.ts                     — train-only normalization, validation checkpoint и metrics
-    predict.ts                   — прогноз TON/USD/RUB
+    features.ts                  — 129 structural/lexical/n-gram признаков username
+    comparables.ts               — time-safe robust comparable sales
+    evaluation.ts                — RMSLE, factor error, coverage и top-tail recall
+    backtest.ts                  — repeated-seed in-memory benchmark без записи artifact
+    liquidity.ts                 — right-censored competing-risk модель ликвидности
+    liquidityMarket.ts           — консервативная сборка listing lifecycle
+    train.ts                     — grouped/temporal split, stacking, calibration и release gate
+    predict.ts                   — P10/P50/P90, OOD, confidence, liquidity и TON/USD/RUB
   generatorModel/
     vocab.ts                     — алфавит и кодирование
     train.ts                     — обучение посимвольного MLP
     generate.ts                  — генерация моделью
   ml/
     mlp.ts                       — локальный MLP + Adam
+    ridge.ts                     — robust weighted ridge и meta-stacker
+    gradientBoostedTrees.ts      — локальный histogram GBT
   web/
     server.ts                    — localhost HTTP/API/static server
     jobs.ts                      — очередь процессов, прогресс и SSE

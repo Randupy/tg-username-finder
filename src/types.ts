@@ -84,6 +84,13 @@ export interface FavoriteEntry {
   addedAt: string;
 }
 
+export interface FavoritePriceLiquidity {
+  /** Estimated probability of a sale within 90 days at the evaluated ask. */
+  saleProbability90d: number;
+  /** True when the liquidity estimate had insufficient or dissimilar evidence. */
+  outOfDistribution: boolean;
+}
+
 export interface FavoritePrice {
   /** Цена или оценка цены в TON. */
   ton: number;
@@ -91,4 +98,23 @@ export interface FavoritePrice {
   usd?: number;
   /** Конвертация по курсу на момент добавления, если она была доступна. */
   rub?: number;
+  /** Calibrated lower and upper TON bounds. They are persisted as a pair. */
+  p10Ton?: number;
+  p90Ton?: number;
+  confidence?: "low" | "medium" | "high";
+  confidenceScore?: number;
+  confidenceDefinition?: "probability-within-2x" | "heuristic-score";
+  liquidity?: FavoritePriceLiquidity;
+  releaseGatePassed?: boolean;
+  /** Price-model OOD state at the time the estimate was saved. */
+  priceOutOfDistribution?: boolean;
+  oodScore?: number;
+  modelDisagreementLog?: number;
+  comparableEffectiveSampleSize?: number;
+  trainedAt?: string;
+  trainedThrough?: string;
+  releaseGateReason?: string;
+  splitStrategy?: "temporal-group" | "group-random" | "random";
+  /** False means the sold-history corpus changed after this artifact was trained. */
+  dataCurrent?: boolean;
 }

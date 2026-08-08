@@ -135,7 +135,19 @@ export class MLP {
    * сети (для softmax — one-hot вектор, для linear — вектор из одного числа).
    * Возвращает средний loss по батчу (MSE для linear, cross-entropy для softmax).
    */
-  trainBatch(inputs: number[][], targets: number[][], learningRate = 0.01): number {
+  trainBatch(
+    inputs: number[][],
+    targets: number[][],
+    learningRate = 0.01,
+    sampleWeights?: readonly number[],
+  ): number {
+    if (
+      sampleWeights &&
+      (sampleWeights.length !== inputs.length ||
+        sampleWeights.some((weight) => !Number.isFinite(weight) || weight <= 0))
+    ) {
+      throw new RangeError("sampleWeights must be positive finite values matching the batch.");
+    }
     const adam = this.ensureAdam();
     this.t++;
     const beta1 = 0.9;
@@ -146,19 +158,26 @@ export class MLP {
     const gradW: number[][][] = this.layers.map(({ W }) => W.map((row) => row.map(() => 0)));
     const gradB: number[][] = this.layers.map(({ b }) => b.map(() => 0));
     let totalLoss = 0;
+    let totalWeight = 0;
 
     for (let s = 0; s < inputs.length; s++) {
+      const sampleWeight = sampleWeights?.[s] ?? 1;
+      totalWeight += sampleWeight;
       const { zs, as } = this.forwardFull(inputs[s]);
       const target = targets[s];
       const output = as[numLayers];
 
       // Для softmax+cross-entropy и для linear+MSE градиент по z на
       // выходном слое одинаково упрощается до (output - target).
-      let dz = output.map((o, i) => o - target[i]);
+      let dz = output.map((o, i) => (o - target[i]) * sampleWeight);
       if (this.config.outputActivation === "softmax") {
-        totalLoss += -target.reduce((s2, tv, i) => s2 + (tv > 0 ? tv * Math.log(Math.max(output[i], 1e-12)) : 0), 0);
+        totalLoss +=
+          sampleWeight *
+          -target.reduce((s2, tv, i) => s2 + (tv > 0 ? tv * Math.log(Math.max(output[i], 1e-12)) : 0), 0);
       } else {
-        totalLoss += dz.reduce((s2, d) => s2 + d * d, 0);
+        totalLoss +=
+          sampleWeight *
+          output.reduce((sum, value, index) => sum + (value - target[index]) ** 2, 0);
       }
 
       for (let l = numLayers - 1; l >= 0; l--) {
@@ -184,7 +203,7 @@ export class MLP {
       }
     }
 
-    const batchSize = inputs.length;
+    const batchSize = Math.max(totalWeight, Number.EPSILON);
     for (let l = 0; l < numLayers; l++) {
       const { W, b } = this.layers[l];
       const { mW, vW, mB, vB } = adam[l];
@@ -217,12 +236,21 @@ export class MLP {
       epochs: number;
       batchSize?: number;
       learningRate?: number;
-      onEpoch?: (epoch: number, loss: number) => void;
+      sampleWeights?: readonly number[];
+      /** Return true to stop after the current epoch. */
+      onEpoch?: (epoch: number, loss: number) => boolean | void;
     },
   ): void {
     const batchSize = opts.batchSize ?? 32;
     const lr = opts.learningRate ?? 0.01;
     const n = inputs.length;
+    if (
+      opts.sampleWeights &&
+      (opts.sampleWeights.length !== n ||
+        opts.sampleWeights.some((weight) => !Number.isFinite(weight) || weight <= 0))
+    ) {
+      throw new RangeError("sampleWeights must be positive finite values matching inputs.");
+    }
     const rand = mulberry32(12345);
 
     for (let epoch = 0; epoch < opts.epochs; epoch++) {
@@ -238,10 +266,13 @@ export class MLP {
         const idx = order.slice(start, start + batchSize);
         const batchInputs = idx.map((i) => inputs[i]);
         const batchTargets = idx.map((i) => targets[i]);
-        epochLoss += this.trainBatch(batchInputs, batchTargets, lr);
+        const batchWeights = opts.sampleWeights?.length
+          ? idx.map((i) => opts.sampleWeights![i])
+          : undefined;
+        epochLoss += this.trainBatch(batchInputs, batchTargets, lr, batchWeights);
         batches++;
       }
-      opts.onEpoch?.(epoch, epochLoss / batches);
+      if (opts.onEpoch?.(epoch, epochLoss / batches) === true) break;
     }
   }
 

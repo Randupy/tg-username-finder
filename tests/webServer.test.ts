@@ -299,7 +299,24 @@ test("local server protects mutations and persists favorites inside an isolated 
       favoritesCount: 0,
     });
     assert.equal((status.body as any).models.price.exists, false);
+    assert.equal((status.body as any).models.price.valid, false);
     assert.equal((status.body as any).models.generator.exists, false);
+
+    mkdirSync(resolve(isolatedRoot, "models"), { recursive: true });
+    const corruptPriceModelPath = resolve(
+      isolatedRoot,
+      "models",
+      "price-mlp.json",
+    );
+    writeFileSync(corruptPriceModelPath, "{not-json", "utf8");
+    const corruptModelStatus = await httpJson(port, "/api/status");
+    assert.equal((corruptModelStatus.body as any).models.price.exists, true);
+    assert.equal((corruptModelStatus.body as any).models.price.valid, false);
+    assert.equal(
+      typeof (corruptModelStatus.body as any).models.price.reason,
+      "string",
+    );
+    unlinkSync(corruptPriceModelPath);
 
     // Курсы TON зависят от внешнего запроса к CoinGecko, недоступного в
     // изолированной тестовой среде — проверяем только то, что маршрут
@@ -327,6 +344,30 @@ test("local server protects mutations and persists favorites inside an isolated 
     assert.equal(rejectedOrigin.status, 403);
     assert.equal(existsSync(resolve(isolatedRoot, "favorites.json")), false);
 
+    const richFavoritePrice = {
+      ton: 125.5,
+      usd: 380,
+      rub: 29_000,
+      p10Ton: 80,
+      p90Ton: 240,
+      confidence: "high",
+      confidenceScore: 0.82,
+      confidenceDefinition: "probability-within-2x",
+      liquidity: {
+        saleProbability90d: 0.64,
+        outOfDistribution: false,
+      },
+      releaseGatePassed: false,
+      priceOutOfDistribution: true,
+      oodScore: 0.76,
+      modelDisagreementLog: 0.31,
+      comparableEffectiveSampleSize: 2.5,
+      trainedAt: "2026-07-30T12:00:00.000Z",
+      trainedThrough: "2026-07-29T12:00:00.000Z",
+      releaseGateReason: "non-temporal-evaluation",
+      splitStrategy: "group-random",
+      dataCurrent: true,
+    };
     const created = await httpJson(port, "/api/favorites", {
       method: "POST",
       origin: localOrigin,
@@ -334,17 +375,18 @@ test("local server protects mutations and persists favorites inside an isolated 
         username: "@Alpha_1",
         source: "telegram",
         note: "first pick",
-        price: { ton: 125.5, usd: 380, rub: 29_000 },
+        price: richFavoritePrice,
       },
     });
     assert.equal(created.status, 201);
     assert.equal((created.body as any).favorite.username, "alpha_1");
-    assert.deepEqual((created.body as any).favorite.price, {
-      ton: 125.5,
-      usd: 380,
-      rub: 29_000,
-    });
+    assert.deepEqual((created.body as any).favorite.price, richFavoritePrice);
     assert.equal(existsSync(resolve(isolatedRoot, "favorites.json")), true);
+    assert.deepEqual(
+      JSON.parse(readFileSync(resolve(isolatedRoot, "favorites.json"), "utf-8"))[0]
+        .price,
+      richFavoritePrice,
+    );
     assert.equal(
       JSON.parse(readFileSync(resolve(foreignCwd, "favorites.json"), "utf-8"))[0]
         .username,
@@ -373,7 +415,7 @@ test("local server protects mutations and persists favorites inside an isolated 
           username: "alpha_1",
           source: "telegram",
           note: "first pick",
-          price: { ton: 125.5, usd: 380, rub: 29_000 },
+          price: richFavoritePrice,
         },
       ],
     );

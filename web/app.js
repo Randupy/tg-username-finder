@@ -628,7 +628,87 @@ function dotClass(tone) {
 
 function modelExists(model) {
   if (typeof model === "boolean") return model;
-  return isObject(model) ? model.exists === true : false;
+  if (!isObject(model)) return false;
+  // New API responses distinguish a physical artifact from a compatible,
+  // loadable model. Fall back to the legacy `exists` contract for generator
+  // models and older servers that do not expose `valid` yet.
+  return typeof model.valid === "boolean"
+    ? model.exists === true && model.valid === true
+    : model.exists === true;
+}
+
+function modelApproved(model) {
+  return (
+    modelExists(model) &&
+    isObject(model) &&
+    model.approved === true &&
+    model.dataCurrent !== false &&
+    model.stale !== true
+  );
+}
+
+function modelInferenceReady(model) {
+  return (
+    modelExists(model) &&
+    isObject(model) &&
+    model.dataCurrent !== false &&
+    model.stale !== true
+  );
+}
+
+const PRICE_RELEASE_REASON_LABELS = {
+  "non-temporal-evaluation":
+    "Нет строгого temporal benchmark: история продаж не содержит достаточного покрытия точными saleAt.",
+  "insufficient-test-data": "В независимой test-когорте недостаточно наблюдений для release gate.",
+  "uncalibrated-confidence": "Недостаточно независимых данных для эмпирической калибровки confidence.",
+  "did-not-beat-baseline": "Модель не превзошла лучший time-safe baseline на независимом тесте.",
+  passed: "Все release-gate проверки пройдены.",
+};
+
+function priceModelPresentation(model) {
+  if (!isObject(model) || model.exists !== true) {
+    return {
+      value: "не готова",
+      description: "Artifact не найден. Сначала соберите продажи и запустите обучение.",
+      approved: false,
+    };
+  }
+  if (model.valid === false) {
+    const reason = String(model.reason || "неизвестная ошибка совместимости");
+    return {
+      value: "несовместима",
+      description: `Artifact найден, но не загружается: ${reason}. Переобучите модель текущей версией Token.`,
+      approved: false,
+    };
+  }
+  if (model.dataCurrent === false || model.stale === true) {
+    return {
+      value: "устарела",
+      description:
+        "История продаж изменилась после обучения. Оценка и ценовой фильтр заблокированы до переобучения модели.",
+      approved: false,
+    };
+  }
+  const approved = modelApproved(model);
+  const split = model.splitStrategy ? ` Split: ${model.splitStrategy}.` : "";
+  if (approved) {
+    return {
+      value: "одобрена",
+      description: `Строгий temporal benchmark и confidence calibration пройдены.${split}`,
+      approved: true,
+    };
+  }
+  const releaseReason = String(model.releaseGateReason || "");
+  const reason =
+    PRICE_RELEASE_REASON_LABELS[releaseReason] ||
+    (model.confidenceCalibrated === false
+      ? PRICE_RELEASE_REASON_LABELS["uncalibrated-confidence"]
+      : "Artifact совместим, но accuracy-sensitive release gate не пройден.");
+  return {
+    value: "кандидат",
+    description: `${reason}${split} Оценки помечаются provisional, ценовой фильтр заблокирован.`,
+    approved: false,
+  };
 }
 
 function modelTimestamp(model) {
@@ -698,7 +778,7 @@ function renderModelMetrics() {
   const mount = $("#model-metrics");
   if (!state.status) return;
   const { data, models } = state.status;
-  const priceReady = modelExists(models.price);
+  const pricePresentation = priceModelPresentation(models.price);
   const generatorReady = modelExists(models.generator);
   mount.innerHTML = [
     metricCard(
@@ -709,15 +789,15 @@ function renderModelMetrics() {
     ),
     metricCard(
       "Модель цены",
-      priceReady ? "готова" : "не готова",
-      priceReady ? "Оценка цены доступна в поиске." : "Сначала соберите данные и запустите обучение.",
-      priceReady,
+      pricePresentation.value,
+      pricePresentation.description,
+      pricePresentation.approved,
       modelTimestamp(models.price),
     ),
     metricCard(
       "AI-генератор",
       generatorReady ? "готов" : "не готов",
-      generatorReady ? "Нейрогенерация доступна." : "Обучите модель на продажах и избранном.",
+      generatorReady ? "Нейрогенерация доступна." : "Обучите модель на продажах и словаре.",
       generatorReady,
       modelTimestamp(models.generator),
     ),
@@ -727,7 +807,15 @@ function renderModelMetrics() {
 function updateModelButtons() {
   if (!state.status) return;
   const sold = state.status.data.soldCount;
-  const corpus = sold + state.status.data.favoritesCount;
+  const dictionaryInput = $("#train-generator-form")?.elements?.dictionaryWords;
+  const requestedDictionaryWords = Number(dictionaryInput?.value ?? 1200);
+  const dictionaryWords = Number.isFinite(requestedDictionaryWords)
+    ? Math.max(0, Math.floor(requestedDictionaryWords))
+    : 1200;
+  // Generator training intentionally excludes favorites. The displayed size
+  // is a conservative readiness estimate from the two real sources; sold
+  // records are reweighted inside the trainer and can contribute more rows.
+  const corpus = sold + dictionaryWords;
   const priceButton = $("#train-price-button");
   const generatorButton = $("#train-generator-button");
   const aiButton = $("#generate-ai-button");
@@ -740,17 +828,32 @@ function updateModelButtons() {
       : `Нужно ещё ${formatNumber(30 - sold)} записей до минимального датасета.`;
   $("#generator-training-hint").textContent =
     corpus >= 20
-      ? `${formatNumber(corpus)} имён в общем корпусе.`
-      : `Нужно ещё ${formatNumber(20 - corpus)} имён в продажах и избранном.`;
+      ? `Оценочный корпус: ${formatNumber(sold)} продаж + ${formatNumber(dictionaryWords)} слов; избранное не используется.`
+      : `Нужно ещё ${formatNumber(20 - corpus)} имён из продаж или словаря; избранное не используется.`;
 
-  const priceReady = modelExists(state.status.models.price);
-  const priceReadyHint = priceReady
-    ? "Необязательно. Кандидатов сначала оценит ценовая модель — на проверку доступности пойдут только те, кто дороже."
-    : "Необязательно, но пока недоступно: сначала обучите ценовую модель на вкладке «Модели».";
+  const pricePresentation = priceModelPresentation(state.status.models.price);
+  const priceApproved = pricePresentation.approved;
+  const priceInferenceReady = modelInferenceReady(state.status.models.price);
+  const priceReadyHint = priceApproved
+    ? "Необязательно. Каждый кандидат сразу получит полную оценку с аналогами и ликвидностью до проверки доступности."
+    : `Недоступно: ${pricePresentation.description}`;
   const searchMinPriceHint = $("#search-min-price-hint");
   if (searchMinPriceHint) searchMinPriceHint.textContent = priceReadyHint;
   const aiMinPriceHint = $("#ai-min-price-hint");
   if (aiMinPriceHint) aiMinPriceHint.textContent = priceReadyHint;
+  for (const input of [$("#search-min-price-ton"), $("#ai-min-price-ton")]) {
+    if (!input) continue;
+    input.disabled = !priceApproved;
+    input.setAttribute("aria-disabled", String(!priceApproved));
+  }
+  for (const input of [
+    $("#search-form")?.elements?.estimatePrice,
+    $("#generate-ai-form")?.elements?.estimatePrice,
+  ]) {
+    if (!input) continue;
+    input.disabled = !priceInferenceReady;
+    input.setAttribute("aria-disabled", String(!priceInferenceReady));
+  }
 }
 
 async function refreshStatus({ silent = false } = {}) {
@@ -1201,7 +1304,7 @@ function compactStatusHtml(group) {
 function resolvePrice(price) {
   const normalized = normalizeFavoritePrice(price);
   if (!normalized) return null;
-  const resolved = { ton: normalized.ton, usd: normalized.usd, rub: normalized.rub };
+  const resolved = { ...normalized };
   if (resolved.usd === undefined && state.rates) {
     resolved.usd = resolved.ton * state.rates.tonUsd;
   }
@@ -1228,6 +1331,15 @@ function priceLabel(price) {
   const resolved = resolvePrice(price);
   if (!resolved) return "—";
   const parts = [`≈ ${formatTon(resolved.ton)}`];
+  if (resolved.p10Ton !== undefined && resolved.p90Ton !== undefined) {
+    parts.push(`P10–P90 ${formatTon(resolved.p10Ton)}–${formatTon(resolved.p90Ton)}`);
+  }
+  if (resolved.confidence) parts.push(`confidence: ${resolved.confidence}`);
+  if (resolved.liquidity && !resolved.liquidity.outOfDistribution) {
+    parts.push(
+      `P(продажа ≤90д): ${Math.round(resolved.liquidity.saleProbability90d * 100)}%`,
+    );
+  }
   if (resolved.usd !== undefined) parts.push(`≈ ${formatUsd(resolved.usd)}`);
   if (resolved.rub !== undefined) parts.push(`≈ ${formatRub(resolved.rub)}`);
   return parts.join(" · ");
@@ -1240,6 +1352,58 @@ function priceChipsHtml(price) {
   const resolved = resolvePrice(price);
   if (!resolved) return "";
   const chips = [`<span class="price-chip">≈ ${escapeHtml(formatTon(resolved.ton))}</span>`];
+  if (resolved.p10Ton !== undefined && resolved.p90Ton !== undefined) {
+    chips.push(
+      `<span class="price-chip price-chip--secondary">P10–P90 ${escapeHtml(formatTon(resolved.p10Ton))}–${escapeHtml(formatTon(resolved.p90Ton))}</span>`,
+    );
+  }
+  if (resolved.confidence) {
+    const score =
+      resolved.confidenceScore === undefined
+        ? ""
+        : resolved.confidenceDefinition === "probability-within-2x"
+          ? ` · ${Math.round(resolved.confidenceScore * 100)}% within ×2`
+          : ` · heuristic ${Math.round(resolved.confidenceScore * 100)}%`;
+    chips.push(
+      `<span class="price-chip price-chip--secondary">confidence: ${escapeHtml(resolved.confidence + score)}</span>`,
+    );
+  }
+  if (resolved.liquidity) {
+    const liquidityLabel = resolved.liquidity.outOfDistribution
+      ? "ликвидность: мало данных"
+      : `P(продажа ≤90д): ${Math.round(resolved.liquidity.saleProbability90d * 100)}%`;
+    chips.push(
+      `<span class="price-chip price-chip--secondary">${escapeHtml(liquidityLabel)}</span>`,
+    );
+  }
+  if (resolved.priceOutOfDistribution === true) {
+    const score =
+      resolved.oodScore === undefined
+        ? ""
+        : ` · ${Math.round(resolved.oodScore * 100)}%`;
+    chips.push(
+      `<span class="price-chip price-chip--secondary">price OOD${escapeHtml(score)}</span>`,
+    );
+  }
+  if (resolved.comparableEffectiveSampleSize !== undefined) {
+    chips.push(
+      `<span class="price-chip price-chip--secondary">аналоги n_eff ${escapeHtml(formatNumber(Math.round(resolved.comparableEffectiveSampleSize * 10) / 10))}</span>`,
+    );
+  }
+  if (resolved.releaseGatePassed === false) {
+    const reason = resolved.releaseGateReason
+      ? PRICE_RELEASE_REASON_LABELS[resolved.releaseGateReason] || resolved.releaseGateReason
+      : "release gate не пройден";
+    const split = resolved.splitStrategy ? ` Split: ${resolved.splitStrategy}.` : "";
+    chips.push(
+      `<span class="price-chip price-chip--secondary">provisional: ${escapeHtml(reason + split)}</span>`,
+    );
+  }
+  if (resolved.dataCurrent === false) {
+    chips.push(
+      '<span class="price-chip price-chip--secondary">stale data: переобучите модель</span>',
+    );
+  }
   if (resolved.usd !== undefined) {
     chips.push(
       `<span class="price-chip price-chip--secondary">≈ ${escapeHtml(formatUsd(resolved.usd))}</span>`,
@@ -1261,10 +1425,98 @@ function normalizeFavoritePrice(price) {
   const ton = Number(price.ton);
   if (!Number.isFinite(ton) || ton < 0) return null;
   const normalized = { ton };
-  const usd = Number(price.usd);
-  const rub = Number(price.rub);
+  const usd = price.usd === null || price.usd === undefined ? Number.NaN : Number(price.usd);
+  const rub = price.rub === null || price.rub === undefined ? Number.NaN : Number(price.rub);
   if (Number.isFinite(usd) && usd >= 0) normalized.usd = usd;
   if (Number.isFinite(rub) && rub >= 0) normalized.rub = rub;
+  const p10Ton = Number(price.p10Ton);
+  const p90Ton = Number(price.p90Ton);
+  if (
+    Number.isFinite(p10Ton) &&
+    Number.isFinite(p90Ton) &&
+    p10Ton >= 0 &&
+    p10Ton <= ton &&
+    p90Ton >= ton
+  ) {
+    normalized.p10Ton = p10Ton;
+    normalized.p90Ton = p90Ton;
+  }
+  if (["low", "medium", "high"].includes(price.confidence)) {
+    normalized.confidence = price.confidence;
+  }
+  const confidenceScore =
+    price.confidenceScore === null || price.confidenceScore === undefined
+      ? Number.NaN
+      : Number(price.confidenceScore);
+  if (Number.isFinite(confidenceScore) && confidenceScore >= 0 && confidenceScore <= 1) {
+    normalized.confidenceScore = confidenceScore;
+  }
+  if (["probability-within-2x", "heuristic-score"].includes(price.confidenceDefinition)) {
+    normalized.confidenceDefinition = price.confidenceDefinition;
+  }
+  if (typeof price.releaseGatePassed === "boolean") {
+    normalized.releaseGatePassed = price.releaseGatePassed;
+  }
+  const oodScore =
+    price.oodScore === null || price.oodScore === undefined
+      ? Number.NaN
+      : Number(price.oodScore);
+  if (Number.isFinite(oodScore) && oodScore >= 0 && oodScore <= 1) {
+    normalized.oodScore = oodScore;
+  }
+  if (typeof price.priceOutOfDistribution === "boolean") {
+    normalized.priceOutOfDistribution = price.priceOutOfDistribution;
+  } else if (typeof price.outOfDistribution === "boolean") {
+    // Runtime predictions use the concise field name; favorites keep the
+    // explicit price prefix so it cannot be confused with liquidity OOD.
+    normalized.priceOutOfDistribution = price.outOfDistribution;
+  }
+  const modelDisagreementLog =
+    price.modelDisagreementLog === null || price.modelDisagreementLog === undefined
+      ? Number.NaN
+      : Number(price.modelDisagreementLog);
+  if (Number.isFinite(modelDisagreementLog) && modelDisagreementLog >= 0) {
+    normalized.modelDisagreementLog = modelDisagreementLog;
+  }
+  const comparableEffectiveSampleSize =
+    price.comparableEffectiveSampleSize === null ||
+    price.comparableEffectiveSampleSize === undefined
+      ? Number.NaN
+      : Number(price.comparableEffectiveSampleSize);
+  if (Number.isFinite(comparableEffectiveSampleSize) && comparableEffectiveSampleSize >= 0) {
+    normalized.comparableEffectiveSampleSize = comparableEffectiveSampleSize;
+  }
+  for (const field of ["trainedAt", "trainedThrough"]) {
+    if (typeof price[field] !== "string") continue;
+    const parsed = Date.parse(price[field]);
+    if (Number.isFinite(parsed)) normalized[field] = new Date(parsed).toISOString();
+  }
+  if (
+    typeof price.releaseGateReason === "string" &&
+    price.releaseGateReason.length > 0 &&
+    price.releaseGateReason.length <= 120
+  ) {
+    normalized.releaseGateReason = price.releaseGateReason;
+  }
+  if (["temporal-group", "group-random", "random"].includes(price.splitStrategy)) {
+    normalized.splitStrategy = price.splitStrategy;
+  }
+  if (typeof price.dataCurrent === "boolean") {
+    normalized.dataCurrent = price.dataCurrent;
+  }
+  if (isObject(price.liquidity)) {
+    const saleProbability90d = Number(price.liquidity.saleProbability90d);
+    if (
+      Number.isFinite(saleProbability90d) &&
+      saleProbability90d >= 0 &&
+      saleProbability90d <= 1
+    ) {
+      normalized.liquidity = {
+        saleProbability90d,
+        outOfDistribution: Boolean(price.liquidity.outOfDistribution),
+      };
+    }
+  }
   return normalized;
 }
 
@@ -1779,6 +2031,26 @@ function bindSearchForm() {
       );
       return;
     }
+    const minPriceTon = optionalNumberValue(form, "minPriceTon");
+    if (minPriceTon !== undefined && !modelApproved(state.status?.models?.price)) {
+      showFormError(
+        "search-form",
+        `Ценовой фильтр недоступен. ${priceModelPresentation(state.status?.models?.price).description}`,
+        form.elements.minPriceTon,
+      );
+      return;
+    }
+    if (
+      checkboxValue(form, "estimatePrice") &&
+      !modelInferenceReady(state.status?.models?.price)
+    ) {
+      showFormError(
+        "search-form",
+        `Оценка цены недоступна. ${priceModelPresentation(state.status?.models?.price).description}`,
+        form.elements.estimatePrice,
+      );
+      return;
+    }
     const params = {
       source: form.elements.source.value,
       mode: form.elements.mode.value,
@@ -1790,7 +2062,7 @@ function bindSearchForm() {
       word,
       wordPosition: form.elements.wordPosition.value,
       delayMs: numberValue(form, "delayMs", 2000),
-      minPriceTon: optionalNumberValue(form, "minPriceTon"),
+      minPriceTon,
       debug: checkboxValue(form, "debug"),
       usePlaywright: checkboxValue(form, "usePlaywright"),
       legacyWeb: checkboxValue(form, "legacyWeb"),
@@ -1841,6 +2113,8 @@ function bindModelForms() {
       }
     });
   }
+  const dictionaryWordsInput = $("#train-generator-form")?.elements?.dictionaryWords;
+  dictionaryWordsInput?.addEventListener("input", updateModelButtons);
 
   const aiForm = $("#generate-ai-form");
   aiForm.addEventListener("submit", async (event) => {
@@ -1851,6 +2125,26 @@ function bindModelForms() {
       showFormError("generate-ai-form", range.message, range.field);
       return;
     }
+    const minPriceTon = optionalNumberValue(aiForm, "minPriceTon");
+    if (minPriceTon !== undefined && !modelApproved(state.status?.models?.price)) {
+      showFormError(
+        "generate-ai-form",
+        `Ценовой фильтр недоступен. ${priceModelPresentation(state.status?.models?.price).description}`,
+        aiForm.elements.minPriceTon,
+      );
+      return;
+    }
+    if (
+      checkboxValue(aiForm, "estimatePrice") &&
+      !modelInferenceReady(state.status?.models?.price)
+    ) {
+      showFormError(
+        "generate-ai-form",
+        `Оценка цены недоступна. ${priceModelPresentation(state.status?.models?.price).description}`,
+        aiForm.elements.estimatePrice,
+      );
+      return;
+    }
     const params = {
       count: numberValue(aiForm, "count", 20),
       minLength: range.min,
@@ -1858,7 +2152,7 @@ function bindModelForms() {
       temperature: numberValue(aiForm, "temperature", 0.8),
       source: aiForm.elements.source.value,
       delayMs: numberValue(aiForm, "delayMs", 2000),
-      minPriceTon: optionalNumberValue(aiForm, "minPriceTon"),
+      minPriceTon,
       estimatePrice: checkboxValue(aiForm, "estimatePrice"),
       safeMode: checkboxValue(aiForm, "safeMode"),
     };

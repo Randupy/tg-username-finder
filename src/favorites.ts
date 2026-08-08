@@ -1,6 +1,11 @@
 import { existsSync, readFileSync } from "node:fs";
 import { writeJsonAtomic } from "./storage/atomic.js";
-import type { FavoriteEntry, FavoritePrice, Source } from "./types.js";
+import type {
+  FavoriteEntry,
+  FavoritePrice,
+  FavoritePriceLiquidity,
+  Source,
+} from "./types.js";
 
 const FAVORITES_PATH = "favorites.json";
 
@@ -31,13 +36,69 @@ function isFiniteNonNegative(value: unknown): value is number {
   return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
+function isProbability(value: unknown): value is number {
+  return isFiniteNonNegative(value) && value <= 1;
+}
+
+function isIsoTimestamp(value: unknown): value is string {
+  if (typeof value !== "string" || value.length === 0 || value.length > 64) return false;
+  const parsed = Date.parse(value);
+  return Number.isFinite(parsed) && new Date(parsed).toISOString() === value;
+}
+
+function isFavoritePriceLiquidity(value: unknown): value is FavoritePriceLiquidity {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const liquidity = value as Partial<FavoritePriceLiquidity>;
+  return (
+    isProbability(liquidity.saleProbability90d) &&
+    typeof liquidity.outOfDistribution === "boolean"
+  );
+}
+
 function isFavoritePrice(value: unknown): value is FavoritePrice {
   if (!value || typeof value !== "object" || Array.isArray(value)) return false;
   const price = value as Partial<FavoritePrice>;
+  const hasP10 = price.p10Ton !== undefined;
+  const hasP90 = price.p90Ton !== undefined;
   return (
     isFiniteNonNegative(price.ton) &&
     (price.usd === undefined || isFiniteNonNegative(price.usd)) &&
-    (price.rub === undefined || isFiniteNonNegative(price.rub))
+    (price.rub === undefined || isFiniteNonNegative(price.rub)) &&
+    hasP10 === hasP90 &&
+    (!hasP10 ||
+      (isFiniteNonNegative(price.p10Ton) &&
+        price.p10Ton <= price.ton &&
+        isFiniteNonNegative(price.p90Ton) &&
+        price.p90Ton >= price.ton)) &&
+    (price.confidence === undefined ||
+      price.confidence === "low" ||
+      price.confidence === "medium" ||
+      price.confidence === "high") &&
+    (price.confidenceScore === undefined || isProbability(price.confidenceScore)) &&
+    (price.confidenceDefinition === undefined ||
+      price.confidenceDefinition === "probability-within-2x" ||
+      price.confidenceDefinition === "heuristic-score") &&
+    (price.liquidity === undefined || isFavoritePriceLiquidity(price.liquidity)) &&
+    (price.releaseGatePassed === undefined ||
+      typeof price.releaseGatePassed === "boolean") &&
+    (price.priceOutOfDistribution === undefined ||
+      typeof price.priceOutOfDistribution === "boolean") &&
+    (price.oodScore === undefined || isProbability(price.oodScore)) &&
+    (price.modelDisagreementLog === undefined ||
+      isFiniteNonNegative(price.modelDisagreementLog)) &&
+    (price.comparableEffectiveSampleSize === undefined ||
+      isFiniteNonNegative(price.comparableEffectiveSampleSize)) &&
+    (price.trainedAt === undefined || isIsoTimestamp(price.trainedAt)) &&
+    (price.trainedThrough === undefined || isIsoTimestamp(price.trainedThrough)) &&
+    (price.releaseGateReason === undefined ||
+      (typeof price.releaseGateReason === "string" &&
+        price.releaseGateReason.length > 0 &&
+        price.releaseGateReason.length <= 120)) &&
+    (price.splitStrategy === undefined ||
+      price.splitStrategy === "temporal-group" ||
+      price.splitStrategy === "group-random" ||
+      price.splitStrategy === "random") &&
+    (price.dataCurrent === undefined || typeof price.dataCurrent === "boolean")
   );
 }
 
@@ -49,6 +110,47 @@ function normalizePrice(price?: FavoritePrice): FavoritePrice | undefined {
   const normalized: FavoritePrice = { ton: price.ton };
   if (price.usd !== undefined) normalized.usd = price.usd;
   if (price.rub !== undefined) normalized.rub = price.rub;
+  if (price.p10Ton !== undefined && price.p90Ton !== undefined) {
+    normalized.p10Ton = price.p10Ton;
+    normalized.p90Ton = price.p90Ton;
+  }
+  if (price.confidence !== undefined) normalized.confidence = price.confidence;
+  if (price.confidenceScore !== undefined) {
+    normalized.confidenceScore = price.confidenceScore;
+  }
+  if (price.confidenceDefinition !== undefined) {
+    normalized.confidenceDefinition = price.confidenceDefinition;
+  }
+  if (price.liquidity !== undefined) {
+    normalized.liquidity = {
+      saleProbability90d: price.liquidity.saleProbability90d,
+      outOfDistribution: price.liquidity.outOfDistribution,
+    };
+  }
+  if (price.releaseGatePassed !== undefined) {
+    normalized.releaseGatePassed = price.releaseGatePassed;
+  }
+  if (price.priceOutOfDistribution !== undefined) {
+    normalized.priceOutOfDistribution = price.priceOutOfDistribution;
+  }
+  if (price.oodScore !== undefined) normalized.oodScore = price.oodScore;
+  if (price.modelDisagreementLog !== undefined) {
+    normalized.modelDisagreementLog = price.modelDisagreementLog;
+  }
+  if (price.comparableEffectiveSampleSize !== undefined) {
+    normalized.comparableEffectiveSampleSize = price.comparableEffectiveSampleSize;
+  }
+  if (price.trainedAt !== undefined) normalized.trainedAt = price.trainedAt;
+  if (price.trainedThrough !== undefined) {
+    normalized.trainedThrough = price.trainedThrough;
+  }
+  if (price.releaseGateReason !== undefined) {
+    normalized.releaseGateReason = price.releaseGateReason;
+  }
+  if (price.splitStrategy !== undefined) {
+    normalized.splitStrategy = price.splitStrategy;
+  }
+  if (price.dataCurrent !== undefined) normalized.dataCurrent = price.dataCurrent;
   return normalized;
 }
 

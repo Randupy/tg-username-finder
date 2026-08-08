@@ -213,13 +213,59 @@ test("normalizes favorite input and enforces source-specific constraints", () =>
       username: " @Alpha_1 ",
       source: "telegram",
       note: "  promising  ",
-      price: { ton: 125.5, usd: 380, rub: 29_000 },
+      price: {
+        ton: 125.5,
+        usd: 380,
+        rub: 29_000,
+        p10Ton: 80,
+        p90Ton: 240,
+        confidence: "high",
+        confidenceScore: 0.82,
+        confidenceDefinition: "probability-within-2x",
+        liquidity: {
+          saleProbability90d: 0.64,
+          outOfDistribution: false,
+        },
+        releaseGatePassed: true,
+        priceOutOfDistribution: false,
+        oodScore: 0.2,
+        modelDisagreementLog: 0.15,
+        comparableEffectiveSampleSize: 9.5,
+        trainedAt: "2026-07-30T12:00:00.000Z",
+        trainedThrough: "2026-07-29T12:00:00.000Z",
+        releaseGateReason: "passed",
+        splitStrategy: "temporal-group",
+        dataCurrent: true,
+      },
     }),
     {
       username: "alpha_1",
       source: "telegram",
       note: "promising",
-      price: { ton: 125.5, usd: 380, rub: 29_000 },
+      price: {
+        ton: 125.5,
+        usd: 380,
+        rub: 29_000,
+        p10Ton: 80,
+        p90Ton: 240,
+        confidence: "high",
+        confidenceScore: 0.82,
+        confidenceDefinition: "probability-within-2x",
+        liquidity: {
+          saleProbability90d: 0.64,
+          outOfDistribution: false,
+        },
+        releaseGatePassed: true,
+        priceOutOfDistribution: false,
+        oodScore: 0.2,
+        modelDisagreementLog: 0.15,
+        comparableEffectiveSampleSize: 9.5,
+        trainedAt: "2026-07-30T12:00:00.000Z",
+        trainedThrough: "2026-07-29T12:00:00.000Z",
+        releaseGateReason: "passed",
+        splitStrategy: "temporal-group",
+        dataCurrent: true,
+      },
     },
   );
 
@@ -250,6 +296,42 @@ test("normalizes favorite input and enforces source-specific constraints", () =>
       username: "validname",
       source: "telegram",
       price: { ton: -1 },
+    }),
+  );
+  assert.throws(() =>
+    normalizeFavoriteInput({
+      username: "validname",
+      source: "telegram",
+      price: { ton: 100, p10Ton: 50 },
+    }),
+  );
+  assert.throws(() =>
+    normalizeFavoriteInput({
+      username: "validname",
+      source: "telegram",
+      price: {
+        ton: 100,
+        liquidity: { saleProbability90d: 1.1, outOfDistribution: false },
+      },
+    }),
+  );
+  assert.deepEqual(
+    normalizeFavoriteInput({
+      username: "validname",
+      source: "telegram",
+      price: { ton: 100, outOfDistribution: true },
+    }).price,
+    { ton: 100, priceOutOfDistribution: true },
+  );
+  assert.throws(() =>
+    normalizeFavoriteInput({
+      username: "validname",
+      source: "telegram",
+      price: {
+        ton: 100,
+        outOfDistribution: true,
+        priceOutOfDistribution: false,
+      },
     }),
   );
 });

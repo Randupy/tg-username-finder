@@ -87,7 +87,26 @@ test("buildFavoritesXlsx maps favorite fields into the expected columns", () => 
       username: "coolvibe",
       source: "telegram",
       note: "звучное, короткое",
-      price: { ton: 125.5, usd: 380, rub: 29_000 },
+      price: {
+        ton: 125.5,
+        usd: 380,
+        rub: 29_000,
+        p10Ton: 80,
+        p90Ton: 240,
+        confidence: "medium",
+        confidenceDefinition: "probability-within-2x",
+        priceOutOfDistribution: false,
+        oodScore: 0.2,
+        modelDisagreementLog: 0.17,
+        releaseGatePassed: false,
+        releaseGateReason: "non-temporal-evaluation",
+        splitStrategy: "group-random",
+        dataCurrent: true,
+        comparableEffectiveSampleSize: 7.5,
+        trainedAt: "2026-07-26T00:00:00.000Z",
+        trainedThrough: "2026-07-25T00:00:00.000Z",
+        liquidity: { saleProbability90d: 0.4, outOfDistribution: true },
+      },
       addedAt: "2026-07-27T12:00:00.000Z",
     },
     {
@@ -105,6 +124,10 @@ test("buildFavoritesXlsx maps favorite fields into the expected columns", () => 
   assert.ok(sheetXml.includes("@coolvibe"));
   assert.ok(sheetXml.includes("Telegram"));
   assert.ok(sheetXml.includes("125.5"));
+  assert.ok(sheetXml.includes("non-temporal-evaluation"));
+  assert.ok(sheetXml.includes("probability-within-2x"));
+  assert.ok(sheetXml.includes("0.17"));
+  assert.ok(sheetXml.includes("2026-07-26T00:00:00.000Z"));
   assert.ok(sheetXml.includes("звучное, короткое"));
   assert.ok(sheetXml.includes("@topauto"));
   assert.ok(sheetXml.includes("Fragment"));
@@ -117,5 +140,5 @@ test("buildFavoritesXlsx works with an empty favorites list", () => {
   const buf = buildFavoritesXlsx([]);
   const entries = readStoredZipEntries(buf);
   const sheetXml = entries.get("xl/worksheets/sheet1.xml")!.toString("utf-8");
-  assert.match(sheetXml, /<dimension ref="A1:G1"\/>/);
+  assert.match(sheetXml, /<dimension ref="A1:W1"\/>/);
 });

@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 import test from "node:test";
-import { extractFeatures, FEATURE_NAMES } from "../src/priceModel/features.js";
+import {
+  extractFeatures,
+  extractPriceFeatures,
+  FEATURE_NAMES,
+  PRICE_FEATURE_NAMES,
+} from "../src/priceModel/features.js";
 
 function featureMap(username: string): Record<string, number> {
   const values = extractFeatures(username);
@@ -28,6 +33,18 @@ test("isDictionaryWord fires on an exact whole-username match", () => {
 test("isDictionaryWord ignores trailing digits/underscores", () => {
   assert.equal(featureMap("auto1").isDictionaryWord, 1);
   assert.equal(featureMap("bank_88").isDictionaryWord, 1);
+});
+
+test("dictionary lookup preserves separator boundaries instead of joining fragments", () => {
+  assert.equal(featureMap("cork").isDictionaryWord, 1);
+  assert.equal(featureMap("cor_k").isDictionaryWord, 0);
+  assert.equal(featureMap("cor_k").containsDictionaryWord, 0);
+
+  assert.equal(featureMap("navy").isDictionaryWord, 1);
+  assert.equal(featureMap("n_avy").isDictionaryWord, 0);
+  assert.equal(featureMap("n_avy").containsDictionaryWord, 0);
+  assert.equal(featureMap("a_u_t_o").isDictionaryWord, 0);
+  assert.equal(featureMap("a_u_t_o").containsDictionaryWord, 0);
 });
 
 test("containsDictionaryWord fires on a compound of two dictionary words", () => {
@@ -65,4 +82,86 @@ test("isTwoWordCompound is 0 when a dictionary word is merely embedded in junk",
   // not a clean two-word compound.
   assert.equal(featureMap("zwautoz").containsDictionaryWord, 1);
   assert.equal(featureMap("zwautoz").isTwoWordCompound, 0);
+});
+
+test("new and legacy feature APIs are aliases with a stable finite schema", () => {
+  assert.strictEqual(FEATURE_NAMES, PRICE_FEATURE_NAMES);
+  assert.strictEqual(extractFeatures, extractPriceFeatures);
+  assert.equal(new Set(PRICE_FEATURE_NAMES).size, PRICE_FEATURE_NAMES.length);
+
+  for (const username of [
+    "",
+    "a",
+    "___",
+    "123",
+    "cor_k",
+    "n_avy",
+    "юзер",
+    "a".repeat(300),
+  ]) {
+    const values = extractPriceFeatures(username);
+    assert.equal(values.length, PRICE_FEATURE_NAMES.length);
+    assert.ok(values.every(Number.isFinite), `${username} produced a non-finite feature`);
+    assert.deepEqual(values, extractPriceFeatures(username), `${username} was not deterministic`);
+  }
+});
+
+test("underscore and digit placement is represented explicitly", () => {
+  const separated = featureMap("_ab__12_");
+  assert.equal(separated.underscoreCount, 4);
+  assert.equal(separated.startsWithUnderscore, 1);
+  assert.equal(separated.endsWithUnderscore, 1);
+  assert.equal(separated.underscoreGroupCount, 3);
+  assert.equal(separated.maxUnderscoreRun, 2);
+  assert.equal(separated.hasConsecutiveUnderscores, 1);
+  assert.equal(separated.digitGroupCount, 1);
+  assert.equal(separated.maxDigitRun, 2);
+
+  const digitsAtEdges = featureMap("12ab34");
+  assert.equal(digitsAtEdges.startsWithDigit, 1);
+  assert.equal(digitsAtEdges.endsWithDigit, 1);
+  assert.equal(digitsAtEdges.leadingDigitCount, 2);
+  assert.equal(digitsAtEdges.trailingDigitCount, 2);
+  assert.equal(digitsAtEdges.digitGroupCount, 2);
+});
+
+test("repeat, ordinal sequence, keyboard and pronounceability signals distinguish patterns", () => {
+  assert.equal(featureMap("abcabc").maxPeriodicRepeatRatio, 1);
+  assert.equal(featureMap("abcdef").ascendingSequenceRatio, 1);
+  assert.equal(featureMap("fedcba").descendingSequenceRatio, 1);
+  assert.equal(featureMap("qwerty").keyboardAdjacencyRatio, 1);
+  assert.ok(
+    featureMap("marina").pronounceabilityScore > featureMap("qzxjkv").pronounceabilityScore,
+  );
+});
+
+test("commercial tokens require a clean boundary or a high-quality compound", () => {
+  assert.equal(featureMap("ai").hasPopularToken, 1);
+  assert.equal(featureMap("ai_shop").commercialTokenCount, 2);
+  assert.equal(featureMap("bestshop").bestCommercialTokenQuality, 0.85);
+  assert.equal(featureMap("chair").hasPopularToken, 0);
+  assert.equal(featureMap("stone").hasPopularToken, 0);
+});
+
+function hashBank(username: string, bank: "A" | "B"): number[] {
+  const features = featureMap(username);
+  return PRICE_FEATURE_NAMES.filter((name) => name.startsWith(`charNgramHash${bank}`)).map(
+    (name) => features[name],
+  );
+}
+
+test("two independent n-gram hash banks are deterministic and separator-sensitive", () => {
+  for (const [withSeparator, joined] of [
+    ["cor_k", "cork"],
+    ["n_avy", "navy"],
+  ] as const) {
+    assert.notDeepEqual(hashBank(withSeparator, "A"), hashBank(joined, "A"));
+    assert.notDeepEqual(hashBank(withSeparator, "B"), hashBank(joined, "B"));
+  }
+
+  const usernames = ["alpha", "alp_ha", "alpha1", "1alpha", "alphanumeric", "qzxjkv"];
+  for (const bank of ["A", "B"] as const) {
+    const signatures = usernames.map((username) => JSON.stringify(hashBank(username, bank)));
+    assert.equal(new Set(signatures).size, usernames.length);
+  }
 });

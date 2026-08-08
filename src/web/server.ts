@@ -45,9 +45,21 @@ interface ServerOptions {
 
 interface ModelStatus {
   exists: boolean;
+  /** Present for models with an authoritative compatibility validator. */
+  valid?: boolean;
+  approved?: boolean;
+  confidenceCalibrated?: boolean;
+  releaseGateReason?: string;
+  splitStrategy?: string;
+  /** False/stale means the sold-history corpus no longer matches dataHash. */
+  dataCurrent?: boolean;
+  stale?: boolean;
+  reason?: string;
   updatedAt?: string;
   trainedAt?: string;
+  trainedThrough?: string;
   trainedOn?: number;
+  schemaVersion?: number;
 }
 
 function securityHeaders(res: ServerResponse): void {
@@ -163,6 +175,25 @@ function modelStatus(path: string): ModelStatus {
   return status;
 }
 
+async function priceModelStatus(path: string): Promise<ModelStatus> {
+  const fileStatus = modelStatus(path);
+  if (!fileStatus.exists) {
+    return { ...fileStatus, valid: false, reason: "file not found" };
+  }
+  try {
+    // Kept dynamic so the lightweight isolated web fixture does not have to
+    // load the complete inference graph when no price artifact exists.
+    const { inspectPriceModel } = await import("../priceModel/predict.js");
+    return { ...fileStatus, ...inspectPriceModel(path) };
+  } catch (error) {
+    return {
+      ...fileStatus,
+      valid: false,
+      reason: error instanceof Error ? error.message : String(error),
+    };
+  }
+}
+
 function serveStatic(pathname: string, res: ServerResponse): void {
   const requested = pathname === "/" ? "index.html" : pathname.replace(/^\/+/, "");
   const target = resolve(WEB_ROOT, requested);
@@ -229,7 +260,9 @@ export function createWebServer(options: ServerOptions = {}): {
             favoritesCount: favorites.length,
           },
           models: {
-            price: modelStatus(resolve(PROJECT_ROOT, "models", "price-mlp.json")),
+            price: await priceModelStatus(
+              resolve(PROJECT_ROOT, "models", "price-mlp.json"),
+            ),
             generator: modelStatus(resolve(PROJECT_ROOT, "models", "generator-mlp.json")),
           },
           activeJob: jobs.getActive(),

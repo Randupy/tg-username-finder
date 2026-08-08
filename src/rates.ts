@@ -4,9 +4,15 @@ import { writeJsonAtomic } from "./storage/atomic.js";
 const CACHE_PATH = "data/rates-cache.json";
 const CACHE_TTL_MS = 15 * 60 * 1000; // 15 минут — курсы не нужно дёргать чаще
 const REQUEST_TIMEOUT_MS = 10_000;
+const RETRY_BASE_DELAY_MS = 30_000;
+const RETRY_MAX_DELAY_MS = 15 * 60 * 1000;
 const TON_RATES_URL =
   "https://api.coingecko.com/api/v3/simple/price?ids=the-open-network&vs_currencies=usd,rub";
 let inProcessRates: Rates | null = null;
+let refreshInFlight: Promise<Rates> | null = null;
+let refreshRetryAfter = 0;
+let consecutiveRefreshFailures = 0;
+let lastRefreshError: Error | null = null;
 
 export interface Rates {
   tonUsd: number;
@@ -83,35 +89,83 @@ function readCachedRates(): Rates | null {
   return null;
 }
 
-export async function getRates(force = false): Promise<Rates> {
-  if (!force && inProcessRates) return inProcessRates;
+function clearRefreshFailure(): void {
+  refreshRetryAfter = 0;
+  consecutiveRefreshFailures = 0;
+  lastRefreshError = null;
+}
+
+function rememberRefreshFailure(error: unknown): Error {
+  const normalized = error instanceof Error ? error : new Error(String(error));
+  consecutiveRefreshFailures++;
+  const delay = Math.min(
+    RETRY_MAX_DELAY_MS,
+    RETRY_BASE_DELAY_MS * 2 ** Math.min(10, consecutiveRefreshFailures - 1),
+  );
+  refreshRetryAfter = Date.now() + delay;
+  lastRefreshError = normalized;
+  return normalized;
+}
+
+export async function getRates(
+  force = false,
+  fetchImpl: typeof fetch = globalThis.fetch,
+): Promise<Rates> {
+  const now = Date.now();
+  if (!force && inProcessRates) {
+    const inProcessAge = now - new Date(inProcessRates.fetchedAt).getTime();
+    if (inProcessAge >= 0 && inProcessAge < CACHE_TTL_MS) return inProcessRates;
+    // Keep a stale value as a fast fallback while an upstream failure is in
+    // negative cache. This is what prevents one timeout per username.
+    if (now < refreshRetryAfter) return inProcessRates;
+  }
 
   const cached = readCachedRates();
   if (!force && cached) {
-    const age = Date.now() - new Date(cached.fetchedAt).getTime();
+    const age = now - new Date(cached.fetchedAt).getTime();
     if (age >= 0 && age < CACHE_TTL_MS) {
       inProcessRates = cached;
+      clearRefreshFailure();
       return cached;
     }
+  }
+  const staleFallback = cached ?? inProcessRates;
+
+  if (!force && now < refreshRetryAfter) {
+    if (staleFallback) {
+      inProcessRates = staleFallback;
+      return staleFallback;
+    }
+    throw lastRefreshError ?? new Error("Rate refresh is temporarily in retry backoff.");
   }
 
-  try {
-    const fresh = await fetchFreshRates();
-    writeJsonAtomic(CACHE_PATH, fresh);
-    inProcessRates = fresh;
-    return fresh;
-  } catch (err) {
-    if (cached) {
-      console.error(
-        `⚠️  Не удалось обновить курсы (${err instanceof Error ? err.message : err}), использую кэш с диска.`,
-      );
-      // Один CLI/job-процесс не должен повторять заведомо неудачный сетевой
-      // запрос для каждого следующего username в той же пачке.
-      inProcessRates = cached;
-      return cached;
+  // Concurrent price estimates share one upstream request as well as the
+  // subsequent negative-cache decision.
+  if (refreshInFlight) return refreshInFlight;
+
+  const refresh = (async (): Promise<Rates> => {
+    try {
+      const fresh = await fetchFreshRates(fetchImpl);
+      writeJsonAtomic(CACHE_PATH, fresh);
+      inProcessRates = fresh;
+      clearRefreshFailure();
+      return fresh;
+    } catch (error) {
+      const normalized = rememberRefreshFailure(error);
+      if (staleFallback) {
+        console.error(
+          `⚠️  Не удалось обновить курсы (${normalized.message}), использую устаревший кэш до следующей попытки.`,
+        );
+        inProcessRates = staleFallback;
+        return staleFallback;
+      }
+      throw normalized;
+    } finally {
+      refreshInFlight = null;
     }
-    throw err;
-  }
+  })();
+  refreshInFlight = refresh;
+  return refresh;
 }
 
 export function convertTon(ton: number, rates: Rates): { ton: number; usd: number; rub: number } {

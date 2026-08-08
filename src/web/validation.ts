@@ -219,7 +219,7 @@ function validateTraining(
   type: "train-price" | "train-generator",
   params: JsonObject,
 ): ValidatedJob {
-  const fallback = type === "train-price" ? 200 : 100;
+  const fallback = 100;
   const epochs = asNumber(params.epochs, fallback, "Количество эпох", 1, 5000);
   const args = [type, "--epochs", String(epochs)];
   if (type === "train-generator") {
@@ -342,6 +342,158 @@ export function normalizeFavoriteInput(input: unknown): {
     }
     if (rawPrice.rub !== undefined) {
       price.rub = asNumber(rawPrice.rub, Number.NaN, "Цена в RUB", 0, 1_000_000_000_000_000, false);
+    }
+    const hasP10 = rawPrice.p10Ton !== undefined;
+    const hasP90 = rawPrice.p90Ton !== undefined;
+    if (hasP10 !== hasP90) {
+      throw new Error("Ценовой интервал должен содержать и p10Ton, и p90Ton");
+    }
+    if (hasP10 && hasP90) {
+      price.p10Ton = asNumber(
+        rawPrice.p10Ton,
+        Number.NaN,
+        "P10 в TON",
+        0,
+        ton,
+        false,
+      );
+      price.p90Ton = asNumber(
+        rawPrice.p90Ton,
+        Number.NaN,
+        "P90 в TON",
+        ton,
+        1_000_000_000_000,
+        false,
+      );
+    }
+    if (rawPrice.confidence !== undefined) {
+      price.confidence = oneOf(
+        rawPrice.confidence,
+        ["low", "medium", "high"] as const,
+        "low",
+        "Confidence",
+      );
+    }
+    if (rawPrice.confidenceScore !== undefined) {
+      price.confidenceScore = asNumber(
+        rawPrice.confidenceScore,
+        Number.NaN,
+        "Confidence score",
+        0,
+        1,
+        false,
+      );
+    }
+    if (rawPrice.confidenceDefinition !== undefined) {
+      price.confidenceDefinition = oneOf(
+        rawPrice.confidenceDefinition,
+        ["probability-within-2x", "heuristic-score"] as const,
+        "heuristic-score",
+        "Confidence definition",
+      );
+    }
+    if (rawPrice.releaseGatePassed !== undefined) {
+      if (typeof rawPrice.releaseGatePassed !== "boolean") {
+        throw new Error("releaseGatePassed должен быть boolean");
+      }
+      price.releaseGatePassed = rawPrice.releaseGatePassed;
+    }
+    for (const [field, label] of [
+      ["priceOutOfDistribution", "priceOutOfDistribution"],
+      ["dataCurrent", "dataCurrent"],
+    ] as const) {
+      if (rawPrice[field] !== undefined) {
+        if (typeof rawPrice[field] !== "boolean") {
+          throw new Error(`${label} должен быть boolean`);
+        }
+        price[field] = rawPrice[field];
+      }
+    }
+    if (rawPrice.outOfDistribution !== undefined) {
+      if (typeof rawPrice.outOfDistribution !== "boolean") {
+        throw new Error("outOfDistribution должен быть boolean");
+      }
+      if (
+        price.priceOutOfDistribution !== undefined &&
+        price.priceOutOfDistribution !== rawPrice.outOfDistribution
+      ) {
+        throw new Error(
+          "outOfDistribution и priceOutOfDistribution не должны противоречить друг другу",
+        );
+      }
+      price.priceOutOfDistribution = rawPrice.outOfDistribution;
+    }
+    if (rawPrice.oodScore !== undefined) {
+      price.oodScore = asNumber(
+        rawPrice.oodScore,
+        Number.NaN,
+        "Price OOD score",
+        0,
+        1,
+        false,
+      );
+    }
+    if (rawPrice.modelDisagreementLog !== undefined) {
+      price.modelDisagreementLog = asNumber(
+        rawPrice.modelDisagreementLog,
+        Number.NaN,
+        "Model disagreement",
+        0,
+        100,
+        false,
+      );
+    }
+    if (rawPrice.comparableEffectiveSampleSize !== undefined) {
+      price.comparableEffectiveSampleSize = asNumber(
+        rawPrice.comparableEffectiveSampleSize,
+        Number.NaN,
+        "Comparable effective sample size",
+        0,
+        1_000_000_000,
+        false,
+      );
+    }
+    for (const field of ["trainedAt", "trainedThrough"] as const) {
+      if (rawPrice[field] === undefined) continue;
+      const timestamp = asString(rawPrice[field]);
+      const parsed = Date.parse(timestamp);
+      if (!Number.isFinite(parsed) || new Date(parsed).toISOString() !== timestamp) {
+        throw new Error(`${field} должен быть каноническим ISO timestamp`);
+      }
+      price[field] = timestamp;
+    }
+    if (rawPrice.releaseGateReason !== undefined) {
+      const reason = asString(rawPrice.releaseGateReason);
+      if (reason.length === 0 || reason.length > 120) {
+        throw new Error("releaseGateReason должен содержать 1–120 символов");
+      }
+      price.releaseGateReason = reason;
+    }
+    if (rawPrice.splitStrategy !== undefined) {
+      price.splitStrategy = oneOf(
+        rawPrice.splitStrategy,
+        ["temporal-group", "group-random", "random"] as const,
+        "random",
+        "Split strategy",
+      );
+    }
+    if (rawPrice.liquidity !== undefined) {
+      const rawLiquidity = asObject(rawPrice.liquidity, "Ликвидность");
+      const saleProbability90d = asNumber(
+        rawLiquidity.saleProbability90d,
+        Number.NaN,
+        "Вероятность продажи за 90 дней",
+        0,
+        1,
+        false,
+      );
+      if (typeof rawLiquidity.outOfDistribution !== "boolean") {
+        throw new Error("liquidity.outOfDistribution должен быть boolean");
+      }
+      price.liquidity = {
+        saleProbability90d,
+        outOfDistribution: rawLiquidity.outOfDistribution,
+      };
     }
   }
 

@@ -6,6 +6,8 @@ results/
 .runtime/
 models/
 data/rates-cache.json
+data/market-events.json
+data/toncenter-actions.json
 *.log
 .env
 .tg-session

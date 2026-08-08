@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { mkdirSync, writeFileSync } from "node:fs";
 import { dirname, resolve } from "node:path";
+import { fileURLToPath } from "node:url";
 import { Command } from "commander";
 import { generateCandidates } from "./generator.js";
 import { checkTelegramWeb } from "./checkers/webCheck.js";
@@ -23,10 +24,25 @@ import type {
 } from "./types.js";
 import { collectSoldHistory } from "./priceData/soldHistory.js";
 import { loadSoldHistory, mergeSoldHistory, saveSoldHistory } from "./priceData/store.js";
-import { trainPriceModel } from "./priceModel/train.js";
 import {
+  loadMarketEvents,
+  mergeMarketEvents,
+  migrateSoldRecords,
+  saveMarketEvents,
+} from "./priceData/marketEvents.js";
+import {
+  collectTonCenterActions,
+  TON_CENTER_MAX_PAGES,
+  TON_CENTER_V3_ACTION_TYPES,
+  type TonCenterKnownActionType,
+} from "./priceData/tonCenter.js";
+import { trainPriceModel } from "./priceModel/train.js";
+import { backtestPriceModel } from "./priceModel/backtest.js";
+import {
+  inspectPriceModel,
   predictPrice,
-  priceModelExists,
+  priceModelApproved,
+  type PriceModelStatus,
   type PricePrediction,
 } from "./priceModel/predict.js";
 import { trainGeneratorModel } from "./generatorModel/train.js";
@@ -58,6 +74,74 @@ function writeJson(path: string, data: unknown): void {
   writeFileSync(path, JSON.stringify(data, null, 2), "utf-8");
 }
 
+function formatPricePrediction(prediction: PricePrediction): string {
+  const reliability = prediction as PricePrediction & {
+    outOfDistribution?: boolean;
+    releaseGateReason?: string;
+    splitStrategy?: "temporal-group" | "group-random" | "random";
+    dataCurrent?: boolean;
+    stale?: boolean;
+  };
+  const interval =
+    `P10–P90 ${prediction.p10Ton.toFixed(1)}–${prediction.p90Ton.toFixed(1)} TON`;
+  const confidence =
+    `confidence=${prediction.confidence} ` +
+    (prediction.confidenceDefinition === "probability-within-2x"
+      ? `(${(prediction.confidenceScore * 100).toFixed(0)}% within ×2)`
+      : `(heuristic ${(prediction.confidenceScore * 100).toFixed(0)}%)`);
+  const fiat =
+    prediction.usd !== null && prediction.rub !== null
+      ? `; ≈$${prediction.usd.toFixed(2)} / ≈₽${prediction.rub.toFixed(0)}`
+      : "";
+  const gate =
+    prediction.releaseGatePassed === false
+      ? `; benchmark=NOT PASSED${reliability.releaseGateReason ? ` (${reliability.releaseGateReason})` : ""}`
+      : "";
+  const split = reliability.splitStrategy ? `; split=${reliability.splitStrategy}` : "";
+  const freshness =
+    reliability.dataCurrent === false || reliability.stale === true
+      ? "; data=STALE (retrain required)"
+      : "";
+  const ood = reliability.outOfDistribution === true ? "; price=OOD" : "";
+  const liquidity =
+    prediction.liquidity && !prediction.liquidity.outOfDistribution
+      ? `; P(sale≤90d)=${(prediction.liquidity.saleProbability90d * 100).toFixed(0)}%`
+      : prediction.liquidity
+        ? "; liquidity=low-data"
+        : "";
+  return `≈${prediction.p50Ton.toFixed(1)} TON (${interval}; ${confidence}${gate}${split}${freshness}${ood}${liquidity}${fiat})`;
+}
+
+function priceModelApprovalFailure(status: PriceModelStatus): string {
+  const reliability = status as PriceModelStatus & {
+    dataCurrent?: boolean;
+    stale?: boolean;
+  };
+  if (!status.exists) return "artifact не найден";
+  if (!status.valid) return `artifact несовместим: ${status.reason ?? "неизвестная ошибка"}`;
+  if (reliability.dataCurrent === false || reliability.stale === true) {
+    return "история продаж изменилась после обучения (artifact stale)";
+  }
+  const parts = [
+    status.releaseGateReason ? `gate=${status.releaseGateReason}` : "release gate не пройден",
+    status.splitStrategy ? `split=${status.splitStrategy}` : "",
+  ].filter(Boolean);
+  return parts.join(", ");
+}
+
+function priceModelInferenceFailure(status: PriceModelStatus): string | null {
+  const reliability = status as PriceModelStatus & {
+    dataCurrent?: boolean;
+    stale?: boolean;
+  };
+  if (!status.exists) return "artifact не найден";
+  if (!status.valid) return `artifact несовместим: ${status.reason ?? "неизвестная ошибка"}`;
+  if (reliability.dataCurrent === false || reliability.stale === true) {
+    return "история продаж изменилась после обучения (artifact stale); требуется переобучение";
+  }
+  return null;
+}
+
 async function estimatePrices(
   usernames: readonly string[],
   heading: string,
@@ -68,10 +152,7 @@ async function estimatePrices(
     try {
       const prediction = await predictPrice(username);
       estimates.set(username, prediction);
-      console.log(
-        `  ${username} — ≈${prediction.ton.toFixed(1)} TON ` +
-          `(≈$${prediction.usd.toFixed(2)} / ≈₽${prediction.rub.toFixed(0)})`,
-      );
+      console.log(`  ${username} — ${formatPricePrediction(prediction)}`);
     } catch (err) {
       console.log(
         `  ${username} — не удалось оценить (${err instanceof Error ? err.message : err})`,
@@ -91,16 +172,16 @@ function withPriceEstimates<T extends { username: string }>(
   });
 }
 
-interface PriceFilterResult {
-  /** Кандидаты, чья предсказанная цена не ниже порога — именно они пойдут на проверку доступности. */
+export interface PriceFilterResult {
+  /** Кандидаты, чей полный P90 не ниже порога — именно они пойдут на проверку доступности. */
   qualified: GeneratedCandidate[];
-  /** Оценки цены, уже посчитанные в процессе фильтрации (переиспользуются в итоговом отчёте). */
+  /** Только полные оценки прошедших кандидатов; model-only/preliminary значений здесь не бывает. */
   estimates: Map<string, PricePrediction>;
-  /** Сколько кандидатов всего прогнали через ценовую модель. */
+  /** Сколько кандидатов всего прогнали через полный prediction pipeline. */
   checked: number;
 }
 
-interface PriceFilterBudget {
+export interface PriceFilterBudget {
   /** hardCap = min(requestedCount * hardCapMultiplier, hardCapMax). По умолчанию — как раньше, 30x/3000. */
   hardCapMultiplier?: number;
   hardCapMax?: number;
@@ -108,12 +189,29 @@ interface PriceFilterBudget {
   maxAttempts?: number;
 }
 
+export interface PriceFilterDependencies {
+  /** Полный prediction pipeline с comparables, calibration и liquidity. */
+  predict: (username: string) => Promise<PricePrediction>;
+  /** Необязательный диагностический callback; тесты могут оставить его пустым. */
+  onPredictionError?: (username: string, error: unknown) => void;
+}
+
+const DEFAULT_PRICE_FILTER_DEPENDENCIES: PriceFilterDependencies = {
+  predict: predictPrice,
+  onPredictionError: (username, error) => {
+    console.log(
+      `  ⚠️  ${username} — не удалось оценить цену (${error instanceof Error ? error.message : error}), пропускаю.`,
+    );
+  },
+};
+
 /**
- * Оценивает кандидатов локальной ценовой моделью ДО сетевых проверок
- * Telegram/Fragment и оставляет только тех, чья предсказанная цена не ниже
- * `minPriceTon`. Предсказание — локальный MLP плюс закэшированный на 15 минут
- * курс TON, поэтому это на порядки дешевле проверки доступности и не тратит
- * лимиты Telegram/Fragment на заведомо недорогие варианты.
+ * Полностью оценивает кандидатов ДО сетевых проверок Telegram/Fragment и
+ * оставляет только тех, чей P90 не ниже `minPriceTon`. Каждый кандидат сразу
+ * проходит тот же pipeline, который попадёт в итоговый вывод: ensemble,
+ * calibration, time-safe comparables, liquidity и конвертацию валют. Отдельной
+ * model-only/preliminary оценки нет, поэтому retrieval не может "вернуть"
+ * уже ошибочно отброшенное имя на несуществующем втором этапе.
  *
  * Если после первой пачки кандидатов не набралось нужное количество,
  * запрашивает у генератора следующие пачки — до `requestedCount` совпадений,
@@ -127,11 +225,12 @@ interface PriceFilterBudget {
  * закономерно колеблется от запуска к запуску даже при неизменном пороге —
  * это не баг сравнения, а статистика маленькой выборки.
  */
-async function collectPriceQualifiedCandidates(
+export async function collectPriceQualifiedCandidates(
   requestedCount: number,
   minPriceTon: number,
   generateBatch: (batchSize: number) => GeneratedCandidate[],
   budget: PriceFilterBudget = {},
+  dependencies: PriceFilterDependencies = DEFAULT_PRICE_FILTER_DEPENDENCIES,
 ): Promise<PriceFilterResult> {
   const seen = new Set<string>();
   const qualified: GeneratedCandidate[] = [];
@@ -145,28 +244,44 @@ async function collectPriceQualifiedCandidates(
     if (qualified.length >= requestedCount || checked >= hardCap) break;
 
     const batch = generateBatch(batchSize);
-    const fresh = batch.filter((c) => !seen.has(c.username));
+    const fresh: GeneratedCandidate[] = [];
+    for (const candidate of batch) {
+      if (seen.has(candidate.username)) continue;
+      // Reserve the username while constructing this batch too: a buggy or
+      // stochastic generator may repeat it inside one returned array.
+      seen.add(candidate.username);
+      fresh.push(candidate);
+    }
     if (fresh.length === 0) break; // пространство вариантов для этих фильтров исчерпано
 
     for (const candidate of fresh) {
-      seen.add(candidate.username);
       if (qualified.length >= requestedCount || checked >= hardCap) break;
 
       try {
-        const prediction = await predictPrice(candidate.username);
+        const prediction = await dependencies.predict(candidate.username);
         checked++;
-        if (prediction.ton >= minPriceTon) {
+        // Recall-oriented thresholding uses the calibrated upper bound from
+        // the complete predictor, including retrieval evidence.
+        if (prediction.p90Ton >= minPriceTon) {
           qualified.push(candidate);
           estimates.set(candidate.username, prediction);
         }
       } catch (err) {
         checked++;
-        console.log(
-          `  ⚠️  ${candidate.username} — не удалось оценить цену (${err instanceof Error ? err.message : err}), пропускаю.`,
-        );
+        dependencies.onPredictionError?.(candidate.username, err);
       }
     }
   }
+
+  qualified.sort((left, right) => {
+    const leftPrice = estimates.get(left.username);
+    const rightPrice = estimates.get(right.username);
+    return (
+      (rightPrice?.p50Ton ?? 0) - (leftPrice?.p50Ton ?? 0) ||
+      (rightPrice?.p90Ton ?? 0) - (leftPrice?.p90Ton ?? 0) ||
+      left.username.localeCompare(right.username)
+    );
+  });
 
   return { qualified, estimates, checked };
 }
@@ -275,12 +390,12 @@ program
   )
   .option(
     "--estimate-price",
-    "оценить примерную цену свободных юзернеймов обученной моделью (npm run train-price)",
+    "оценить P10/P50/P90, confidence и comparable sales (npm run train-price)",
     false,
   )
   .option(
     "--min-price-ton <ton>",
-    "проверять доступность только у кандидатов, чья предсказанная цена не ниже этого порога (требует npm run train-price)",
+    "полностью оценивать кандидатов и оставлять для проверки тех, чей P90 достигает порога",
   )
   .option(
     "--show-taken",
@@ -317,10 +432,13 @@ program
       raw.minPriceTon === undefined
         ? undefined
         : numberOption(raw.minPriceTon, "--min-price-ton", 0, 1_000_000_000);
-    if (minPriceTon !== undefined && !priceModelExists()) {
+    if (minPriceTon !== undefined && !priceModelApproved()) {
+      const status = inspectPriceModel();
       console.error(
-        "--min-price-ton требует обученную ценовую модель. Сначала соберите данные " +
-          "(npm run collect-sales) и обучите модель (npm run train-price).",
+        "--min-price-ton требует одобренную ценовую модель: строгий temporal backtest, " +
+          "успешный benchmark gate и эмпирическую калибровку confidence. " +
+          `Текущий статус: ${priceModelApprovalFailure(status)}. ` +
+          "Соберите точные saleAt и заново запустите npm run train-price.",
       );
       process.exit(1);
     }
@@ -407,8 +525,8 @@ program
 
     if (minPriceTon !== undefined) {
       console.log(
-        `Ценовой фильтр: от ${minPriceTon} TON — сначала оцениваю кандидатов локальной моделью ` +
-          "(без сети), проверка доступности пойдёт только для тех, кто прошёл порог.\n",
+        `Ценовой фильтр: от ${minPriceTon} TON — полностью оцениваю каждого кандидата ` +
+          "с calibration, аналогами и ликвидностью; проверка доступности пойдёт только после P90-фильтра.\n",
       );
       const filtered = await collectPriceQualifiedCandidates(opts.count, minPriceTon, (batchSize) =>
         generateCandidates({ ...opts, count: batchSize }),
@@ -453,7 +571,7 @@ program
     if (opts.dryRun) {
       for (const c of candidates) {
         const priceLabel = priceEstimates.has(c.username)
-          ? ` — ≈${priceEstimates.get(c.username)!.ton.toFixed(1)} TON`
+          ? ` — ${formatPricePrediction(priceEstimates.get(c.username)!)}`
           : "";
         console.log(`  [${c.mode}] ${c.username}${priceLabel}`);
       }
@@ -600,15 +718,16 @@ program
         `\nЧтобы добавить в избранное: npm run favorites -- add <username> --source telegram`,
       );
 
-      // Ценовой фильтр уже оценил всех кандидатов, дошедших до проверки
-      // доступности, — пересчитывать их ещё раз не нужно.
+      // При ценовом фильтре карта уже содержит единственную полную оценку;
+      // при обычном --estimate-price оцениваем только доступные имена.
       const missing = availableForEstimate.filter((u) => !priceEstimates.has(u));
       const wantsEstimate = Boolean(raw.estimatePrice) || minPriceTon !== undefined;
 
       if (missing.length > 0 && wantsEstimate) {
-        if (!priceModelExists()) {
+        const modelFailure = priceModelInferenceFailure(inspectPriceModel());
+        if (modelFailure) {
           console.log(
-            "\n⚠️  --estimate-price: модель оценки цены ещё не обучена. Соберите данные " +
+            `\n⚠️  --estimate-price недоступен: ${modelFailure}. Соберите данные ` +
               "(npm run collect-sales) и обучите модель (npm run train-price), затем повторите поиск.",
           );
         } else {
@@ -619,14 +738,11 @@ program
           for (const [username, prediction] of newEstimates) priceEstimates.set(username, prediction);
         }
       } else if (minPriceTon !== undefined && priceEstimates.size > 0) {
-        console.log("\nОценка цены (посчитана на этапе ценового фильтра):");
+        console.log("\nПолная оценка цены после P90-фильтра:");
         for (const username of availableForEstimate) {
           const prediction = priceEstimates.get(username);
           if (!prediction) continue;
-          console.log(
-            `  ${username} — ≈${prediction.ton.toFixed(1)} TON ` +
-              `(≈$${prediction.usd.toFixed(2)} / ≈₽${prediction.rub.toFixed(0)})`,
-          );
+          console.log(`  ${username} — ${formatPricePrediction(prediction)}`);
         }
       }
     }
@@ -682,23 +798,242 @@ program
 
     const merged = mergeSoldHistory(loadSoldHistory(), collected);
     saveSoldHistory(merged);
+    const marketEvents = mergeMarketEvents(
+      loadMarketEvents(),
+      migrateSoldRecords(merged),
+    );
+    saveMarketEvents(marketEvents);
     console.log(
-      `\nСобрано за этот запуск: ${collected.length}. Всего в data/sold-history.json: ${merged.length}.`,
+      `\nСобрано за этот запуск: ${collected.length}. ` +
+        `Продаж в data/sold-history.json: ${merged.length}; ` +
+        `событий в data/market-events.json: ${marketEvents.length}.`,
+    );
+  });
+
+program
+  .command("migrate-market-events")
+  .description("Перенести legacy sold-history в строгий immutable market-event store")
+  .action(() => {
+    const sold = loadSoldHistory();
+    const migrated = migrateSoldRecords(sold);
+    const merged = mergeMarketEvents(loadMarketEvents(), migrated);
+    saveMarketEvents(merged);
+    console.log(
+      `Market-event migration: ${sold.length} sold records -> ` +
+        `${merged.length} immutable events in data/market-events.json.`,
+    );
+  });
+
+program
+  .command("collect-ton-actions")
+  .description(
+    "Собрать и строго проверить сырые TON Center v3 actions без объявления их продажами",
+  )
+  .requiredOption("--account <address>", "TON account/NFT/marketplace address")
+  .option("--pages <n>", "максимум страниц", "10")
+  .option("--limit <n>", "actions на страницу", "1000")
+  .option("--delay <ms>", "пауза между страницами (без ключа рекомендуется 1000)", "1000")
+  .option("--start-utime <unix>", "нижняя граница Unix time")
+  .option("--end-utime <unix>", "верхняя граница Unix time")
+  .option("--types <csv>", "фильтр action types через запятую")
+  .option("--out <path>", "файл с raw actions/quarantine/diagnostics", "data/toncenter-actions.json")
+  .action(async (raw) => {
+    const knownTypes = new Set<string>(TON_CENTER_V3_ACTION_TYPES);
+    const actionTypes = raw.types
+      ? String(raw.types)
+          .split(",")
+          .map((value) => value.trim())
+          .filter(Boolean)
+      : undefined;
+    if (actionTypes?.some((value) => !knownTypes.has(value))) {
+      console.error(
+        `--types содержит неподдерживаемый тип; допустимо: ${TON_CENTER_V3_ACTION_TYPES.join(", ")}`,
+      );
+      process.exit(1);
+    }
+    const collection = await collectTonCenterActions(
+      {
+        account: String(raw.account),
+        limit: integerOption(raw.limit, "--limit", 1, 1000),
+        sort: "desc",
+        ...(raw.startUtime === undefined
+          ? {}
+          : {
+              startUtime: integerOption(
+                raw.startUtime,
+                "--start-utime",
+                0,
+                2_147_483_647,
+              ),
+            }),
+        ...(raw.endUtime === undefined
+          ? {}
+          : {
+              endUtime: integerOption(
+                raw.endUtime,
+                "--end-utime",
+                0,
+                2_147_483_647,
+              ),
+            }),
+        ...(actionTypes
+          ? { actionTypes: actionTypes as TonCenterKnownActionType[] }
+          : {}),
+      },
+      {
+        maxPages: integerOption(raw.pages, "--pages", 1, TON_CENTER_MAX_PAGES),
+        pageDelayMs: integerOption(raw.delay, "--delay", 0, 60_000),
+        ...(process.env.TONCENTER_API_KEY
+          ? { apiKey: process.env.TONCENTER_API_KEY }
+          : {}),
+      },
+    );
+    writeJson(String(raw.out), collection);
+    console.log(
+      `TON Center: ${collection.actions.length} valid raw actions, ` +
+        `${collection.quarantined.length} quarantined, pages=${collection.pagesFetched}, ` +
+        `complete=${collection.complete}. Никакие actions автоматически не помечены продажами.`,
     );
   });
 
 program
   .command("train-price")
-  .description("Обучить модель оценки цены на собранной истории продаж (data/sold-history.json)")
-  .option("--epochs <n>", "число эпох обучения", "200")
+  .description("Обучить и откалибровать ансамбль цены на временном/grouped split")
+  .option("--epochs <n>", "максимальное число эпох каждого MLP", "100")
+  .option("--ensemble <n>", "число независимо инициализированных MLP", "3")
+  .option("--batch-size <n>", "размер mini-batch", "64")
+  .option("--learning-rate <n>", "скорость обучения MLP", "0.003")
+  .option("--early-stopping <n>", "остановка после N эпох без улучшения", "15")
+  .option("--gbt-trees <n>", "максимум деревьев градиентного бустинга", "300")
+  .option("--gbt-depth <n>", "максимальная глубина дерева", "4")
+  .option("--stacker-fraction <n>", "доля отдельной stacker-когорты", "0.1")
+  .option("--calibration-fraction <n>", "доля отдельной calibration-когорты", "0.1")
+  .option("--test-fraction <n>", "доля нетронутой test-когорты", "0.1")
+  .option("--split-strategy <name>", "temporal-group | random", "temporal-group")
   .action((raw) => {
-    trainPriceModel({ epochs: integerOption(raw.epochs, "--epochs", 1, 5000) });
+    const splitStrategy = String(raw.splitStrategy);
+    if (splitStrategy !== "temporal-group" && splitStrategy !== "random") {
+      console.error("--split-strategy: требуется temporal-group или random");
+      process.exit(1);
+    }
+    trainPriceModel({
+      epochs: integerOption(raw.epochs, "--epochs", 1, 5000),
+      ensembleSize: integerOption(raw.ensemble, "--ensemble", 1, 9),
+      batchSize: integerOption(raw.batchSize, "--batch-size", 1, 10_000),
+      learningRate: numberOption(raw.learningRate, "--learning-rate", 0.00001, 1),
+      earlyStoppingRounds: integerOption(
+        raw.earlyStopping,
+        "--early-stopping",
+        1,
+        integerOption(raw.epochs, "--epochs", 1, 5000),
+      ),
+      gbtTrees: integerOption(raw.gbtTrees, "--gbt-trees", 1, 2000),
+      gbtMaxDepth: integerOption(raw.gbtDepth, "--gbt-depth", 1, 8),
+      stackerFraction: numberOption(
+        raw.stackerFraction,
+        "--stacker-fraction",
+        0.001,
+        0.3,
+      ),
+      calibrationFraction: numberOption(
+        raw.calibrationFraction,
+        "--calibration-fraction",
+        0.001,
+        0.3,
+      ),
+      testFraction: numberOption(raw.testFraction, "--test-fraction", 0.001, 0.3),
+      splitStrategy,
+    });
+  });
+
+program
+  .command("backtest-price")
+  .description(
+    "Повторить полный in-memory benchmark на нескольких seed; модель и данные не перезаписываются",
+  )
+  .option("--runs <n>", "число независимых прогонов", "5")
+  .option("--base-seed <n>", "первый seed детерминированной серии", "1260216045")
+  .option("--epochs <n>", "максимальное число эпох каждого MLP", "100")
+  .option("--ensemble <n>", "число независимо инициализированных MLP", "3")
+  .option("--batch-size <n>", "размер mini-batch", "64")
+  .option("--learning-rate <n>", "скорость обучения MLP", "0.003")
+  .option("--early-stopping <n>", "остановка после N эпох без улучшения", "15")
+  .option("--gbt-trees <n>", "максимум деревьев градиентного бустинга", "300")
+  .option("--gbt-depth <n>", "максимальная глубина деревьев", "4")
+  .option("--stacker-fraction <n>", "доля отдельной stacker-когорты", "0.1")
+  .option("--calibration-fraction <n>", "доля calibration-когорты", "0.1")
+  .option("--test-fraction <n>", "доля финальной test-когорты", "0.1")
+  .option("--split-strategy <name>", "temporal-group | random", "temporal-group")
+  .option("--out <path>", "сохранить полный JSON-отчёт")
+  .action((raw) => {
+    const splitStrategy = String(raw.splitStrategy);
+    if (splitStrategy !== "temporal-group" && splitStrategy !== "random") {
+      console.error("--split-strategy: требуется temporal-group или random");
+      process.exit(1);
+    }
+    const epochs = integerOption(raw.epochs, "--epochs", 1, 5000);
+    const result = backtestPriceModel(loadSoldHistory(), {
+      runs: integerOption(raw.runs, "--runs", 1, 100),
+      baseSeed: integerOption(raw.baseSeed, "--base-seed", 0, 2_147_483_647),
+      training: {
+        epochs,
+        ensembleSize: integerOption(raw.ensemble, "--ensemble", 1, 9),
+        batchSize: integerOption(raw.batchSize, "--batch-size", 1, 10_000),
+        learningRate: numberOption(raw.learningRate, "--learning-rate", 0.00001, 1),
+        earlyStoppingRounds: integerOption(
+          raw.earlyStopping,
+          "--early-stopping",
+          1,
+          epochs,
+        ),
+        gbtTrees: integerOption(raw.gbtTrees, "--gbt-trees", 1, 2000),
+        gbtMaxDepth: integerOption(raw.gbtDepth, "--gbt-depth", 1, 8),
+        stackerFraction: numberOption(
+          raw.stackerFraction,
+          "--stacker-fraction",
+          0.001,
+          0.3,
+        ),
+        calibrationFraction: numberOption(
+          raw.calibrationFraction,
+          "--calibration-fraction",
+          0.001,
+          0.3,
+        ),
+        testFraction: numberOption(raw.testFraction, "--test-fraction", 0.001, 0.3),
+        splitStrategy,
+      },
+    });
+    const metric = (value: { mean: number; std: number }): string =>
+      `${value.mean.toFixed(3)} ± ${value.std.toFixed(3)}`;
+    const strategies = [...new Set(result.runs.map((run) => run.split.strategy))];
+    console.log(`\nBacktest: ${result.runCount} runs; split=${strategies.join(", ")}.`);
+    console.log(
+      `RMSLE ${metric(result.summary.testRmsle)}; ` +
+        `within×2 ${(result.summary.testWithin2x.mean * 100).toFixed(1)}% ± ` +
+        `${(result.summary.testWithin2x.std * 100).toFixed(1)}%; ` +
+        `Spearman ${metric(result.summary.testSpearman)}.`,
+    );
+    console.log(
+      `Top-5% recall ${(result.summary.testTopTailRecall.mean * 100).toFixed(1)}%; ` +
+        `P10–P90 coverage ${(result.summary.testIntervalCoverage.mean * 100).toFixed(1)}%; ` +
+        `gate pass rate ${(result.summary.releaseGatePass.mean * 100).toFixed(0)}%.`,
+    );
+    if (!strategies.every((strategy) => strategy === "temporal-group")) {
+      console.log(
+        "⚠️  Нет достаточного покрытия точными saleAt: результаты диагностические и не одобряют модель.",
+      );
+    }
+    if (raw.out) {
+      writeJson(String(raw.out), result);
+      console.log(`Полный backtest-отчёт сохранён в ${raw.out}`);
+    }
   });
 
 program
   .command("train-generator")
   .description(
-    "Обучить нейросеть-генератор юзернеймов на избранном + собранной истории продаж (с учётом цены) + словаре",
+    "Обучить нейросеть-генератор юзернеймов на истории продаж (с учётом цены) + словаре; избранное не используется",
   )
   .option("--epochs <n>", "число эпох обучения", "100")
   .option(
@@ -721,10 +1056,10 @@ program
   .option("--max-length <n>", "максимальная длина", "8")
   .option("--temperature <t>", "0 = всегда самый вероятный символ, выше — разнообразнее/случайнее", "0.8")
   .option("--source <source>", "telegram | fragment | both — проверить доступность (по умолчанию не проверяет)")
-  .option("--estimate-price", "оценить цену обученной моделью (npm run train-price)", false)
+  .option("--estimate-price", "оценить P10/P50/P90 и confidence (npm run train-price)", false)
   .option(
     "--min-price-ton <ton>",
-    "проверять доступность только у кандидатов, чья предсказанная цена не ниже этого порога (требует npm run train-price)",
+    "полностью оценивать кандидатов и оставлять тех, чей P90 достигает порога (требует approved-модель)",
   )
   .option("--delay <ms>", "пауза между запросами при проверке, мс", "2000")
   .option(
@@ -759,10 +1094,13 @@ program
       raw.minPriceTon === undefined
         ? undefined
         : numberOption(raw.minPriceTon, "--min-price-ton", 0, 1_000_000_000);
-    if (minPriceTon !== undefined && !priceModelExists()) {
+    if (minPriceTon !== undefined && !priceModelApproved()) {
+      const status = inspectPriceModel();
       console.error(
-        "--min-price-ton требует обученную ценовую модель. Сначала соберите данные " +
-          "(npm run collect-sales) и обучите модель (npm run train-price).",
+        "--min-price-ton требует одобренную ценовую модель: строгий temporal backtest, " +
+          "успешный benchmark gate и эмпирическую калибровку confidence. " +
+          `Текущий статус: ${priceModelApprovalFailure(status)}. ` +
+          "Соберите точные saleAt и заново запустите npm run train-price.",
       );
       process.exit(1);
     }
@@ -772,8 +1110,8 @@ program
 
     if (minPriceTon !== undefined) {
       console.log(
-        `Ценовой фильтр: от ${minPriceTon} TON — сначала оцениваю кандидатов нейросети локальной ` +
-          "моделью цены (без сети), проверка доступности пойдёт только для тех, кто прошёл порог.\n",
+        `Ценовой фильтр: от ${minPriceTon} TON — полностью оцениваю каждого кандидата нейросети ` +
+          "с calibration, аналогами и ликвидностью; проверка доступности пойдёт только после P90-фильтра.\n",
       );
       const filtered = await collectPriceQualifiedCandidates(
         count,
@@ -819,15 +1157,16 @@ program
     if (!raw.source) {
       for (const c of candidates) {
         const priceLabel = priceEstimates.has(c.username)
-          ? ` — ≈${priceEstimates.get(c.username)!.ton.toFixed(1)} TON`
+          ? ` — ${formatPricePrediction(priceEstimates.get(c.username)!)}`
           : "";
         console.log(`  ${c.username}${priceLabel}`);
       }
       const wantsEstimate = Boolean(raw.estimatePrice) || minPriceTon !== undefined;
       if (wantsEstimate && priceEstimates.size === 0) {
-        if (!priceModelExists()) {
+        const modelFailure = priceModelInferenceFailure(inspectPriceModel());
+        if (modelFailure) {
           console.log(
-            "\n⚠️  --estimate-price: модель цены ещё не обучена (npm run train-price).",
+            `\n⚠️  --estimate-price недоступен: ${modelFailure} (npm run train-price).`,
           );
         } else {
           priceEstimates = await estimatePrices(
@@ -897,23 +1236,21 @@ program
       const missing = free.filter((u) => !priceEstimates.has(u));
       const wantsEstimate = Boolean(raw.estimatePrice) || minPriceTon !== undefined;
       if (missing.length > 0 && wantsEstimate) {
-        if (!priceModelExists()) {
+        const modelFailure = priceModelInferenceFailure(inspectPriceModel());
+        if (modelFailure) {
           console.log(
-            "\n⚠️  --estimate-price: модель цены ещё не обучена (npm run train-price).",
+            `\n⚠️  --estimate-price недоступен: ${modelFailure} (npm run train-price).`,
           );
         } else {
           const newEstimates = await estimatePrices(missing, "Примерная оценка цены:");
           for (const [username, prediction] of newEstimates) priceEstimates.set(username, prediction);
         }
       } else if (minPriceTon !== undefined && priceEstimates.size > 0) {
-        console.log("\nОценка цены (посчитана на этапе ценового фильтра):");
+        console.log("\nПолная оценка цены после P90-фильтра:");
         for (const username of free) {
           const prediction = priceEstimates.get(username);
           if (!prediction) continue;
-          console.log(
-            `  ${username} — ≈${prediction.ton.toFixed(1)} TON ` +
-              `(≈$${prediction.usd.toFixed(2)} / ≈₽${prediction.rub.toFixed(0)})`,
-          );
+          console.log(`  ${username} — ${formatPricePrediction(prediction)}`);
         }
       }
     }
@@ -997,4 +1334,12 @@ favorites
     }
   });
 
-program.parseAsync(process.argv);
+export async function runCli(argv: readonly string[] = process.argv): Promise<void> {
+  await program.parseAsync([...argv]);
+}
+
+const CURRENT_CLI_FILE = fileURLToPath(import.meta.url);
+const INVOKED_CLI_FILE = process.argv[1] ? resolve(process.argv[1]) : "";
+if (INVOKED_CLI_FILE === resolve(CURRENT_CLI_FILE)) {
+  await runCli();
+}
